@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "vite build && playwright test",
-    "screenshots": "vite build && SCREENSHOTS=1 playwright test e2e/screenshots.spec.ts"
+    "screenshots": "vite build && SCREENSHOTS=1 playwright test e2e/screenshots.spec.ts e2e/motion.spec.ts"
   },
   "dependencies": {
     "three": "^0.187.0"

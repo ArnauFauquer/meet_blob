@@ -17,6 +17,12 @@ import type { View } from '../state';
 export const RENDER_SCALE = 0.75;
 const CALM_FRAME_MS = 1000 / 30; // idle (and error/offline) is capped at 30 fps
 const EASE_S = 0.6; // time constant of the state crossfade
+// Quality tiers (QUALITY define in blob.frag): 2 full, 1 fewer march steps and
+// reflection taps, 0 minimal. The page starts at 2 and steps down, never up,
+// when the moving average of the frame interval stays above SLOW_MS.
+export const MAX_QUALITY = 2;
+const SLOW_MS = 50; // under 20 fps
+const SLOW_FOR_S = 4;
 
 export interface FrameInput {
   view: View;
@@ -41,6 +47,10 @@ export class BlobRenderer {
   private level = 0;
   private flashT = 0;
   private raf = 0;
+  quality = MAX_QUALITY;
+  autoQuality = true;
+  private avgMs = 0;
+  private slowS = 0;
 
   constructor(canvas: HTMLCanvasElement, input: () => FrameInput, onLost: (lost: boolean) => void) {
     this.canvas = canvas;
@@ -53,6 +63,7 @@ export class BlobRenderer {
       fragmentShader,
       depthTest: false,
       depthWrite: false,
+      defines: { QUALITY: MAX_QUALITY },
       uniforms: {
         uRes: { value: new Vector2() },
         uFlow: { value: 0 },
@@ -112,6 +123,32 @@ export class BlobRenderer {
     (this.material.uniforms.uRes.value as Vector2).copy(v);
   }
 
+  setQuality(q: number): void {
+    q = Math.max(0, Math.min(MAX_QUALITY, Math.round(q)));
+    if (q === this.quality) return;
+    this.quality = q;
+    this.material.defines.QUALITY = q;
+    this.material.needsUpdate = true; // one shader rebuild per tier change
+  }
+
+  // Debug clock for the film strip: stop the loop and restart the motion from
+  // zero in `view`'s look, so frames are reproducible.
+  freeze(view: View): void {
+    this.stop();
+    Object.assign(this.cur, structuredClone(lookFor(view)));
+    const u = this.material.uniforms;
+    u.uFlow.value = 0;
+    u.uPhase.value = 0;
+    this.level = 0;
+    this.flashT = 0;
+  }
+
+  // Advances the frozen clock by `dtS` with the given input; draws when asked.
+  step(dtS: number, input: FrameInput, draw: boolean): void {
+    this.advance(dtS, input.view, input.level);
+    if (draw) this.renderer.render(this.scene, this.camera);
+  }
+
   private frame(now: number): void {
     if (this.lost) return;
     const { view, level } = this.input();
@@ -120,7 +157,25 @@ export class BlobRenderer {
     this.lastDraw = now;
     const dt = Math.min(0.1, this.last ? (now - this.last) / 1000 : 0);
     this.last = now;
+    this.frameMs = dt * 1000;
+    this.adaptQuality(dt);
+    this.advance(dt, view, level);
+    this.renderer.render(this.scene, this.camera);
+  }
 
+  // Simple moving average of the frame interval; a long slow stretch drops one tier.
+  private adaptQuality(dt: number): void {
+    if (dt <= 0 || document.hidden || !this.autoQuality) return;
+    this.avgMs += (dt * 1000 - this.avgMs) * 0.05;
+    this.slowS = this.avgMs > SLOW_MS ? this.slowS + dt : 0;
+    if (this.slowS > SLOW_FOR_S && this.quality > 0) {
+      this.setQuality(this.quality - 1);
+      this.slowS = 0;
+      this.avgMs = 0;
+    }
+  }
+
+  private advance(dt: number, view: View, level: number): void {
     const target = lookFor(view);
     const k = 1 - Math.exp(-dt / EASE_S);
     const c = this.cur;
@@ -144,8 +199,5 @@ export class BlobRenderer {
     u.uGlow.value = c.glow;
     u.uBright.value = c.bright;
     u.uFlash.value = this.flashT;
-
-    this.frameMs = dt * 1000;
-    this.renderer.render(this.scene, this.camera);
   }
 }

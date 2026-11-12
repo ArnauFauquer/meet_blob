@@ -37,7 +37,7 @@ export default defineConfig({
     permissions: ['microphone'],
     launchOptions: { args: [...chromiumArgs, '--autoplay-policy=no-user-gesture-required'] },
   },
-  testIgnore: process.env.SCREENSHOTS ? [] : ['screenshots.spec.ts'],
+  testIgnore: process.env.SCREENSHOTS ? [] : ['screenshots.spec.ts', 'motion.spec.ts'],
   webServer: external
     ? undefined
     : {

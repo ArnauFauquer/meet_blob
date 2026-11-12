@@ -183,7 +183,8 @@ onPress(document.body, onTap, () => diag.show());
 keepAwake();
 void fetchDeviceConfig(creds.token, creds.device).then((c) => (deviceConfig = c));
 
-// Read-only hooks for the e2e tests and the screenshot script.
+// Hooks for the e2e tests and the screenshot scripts. Read-only except the
+// debug clock (freeze, step) and the quality lock used by the film strip.
 declare global {
   interface Window {
     blobDebug: Record<string, unknown>;
@@ -216,5 +217,19 @@ window.blobDebug = {
   },
   get frameMs() {
     return renderer?.frameMs ?? 0;
+  },
+  get quality() {
+    return renderer?.quality ?? -1;
+  },
+  setQuality(q: number) {
+    if (!renderer) return;
+    renderer.autoQuality = false;
+    renderer.setQuality(q);
+  },
+  freeze(v: View) {
+    renderer?.freeze(v);
+  },
+  step(dtS: number, v: View, level: number, draw: boolean) {
+    renderer?.step(dtS, { view: v, level }, draw);
   },
 };
