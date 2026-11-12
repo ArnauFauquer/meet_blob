@@ -1,0 +1,4 @@
+{
+  "tablet": { "sound": true, "wake": true },
+  "desktop": { "sound": false, "wake": false }
+}
