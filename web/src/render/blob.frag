@@ -59,7 +59,7 @@ float sphereShape(vec3 p) {
     d = smin(d, length(p - c) - r * 0.62, 0.32);
   }
   d += (noise(p * 1.7 + vec3(0.0, uFlow * 0.5, uFlow * 0.3)) - 0.5) * uAmp * 0.7;
-  d += (noise(p * 2.2 + vec3(0.0, uFlow * 1.3, uFlow * 0.9)) - 0.5) * uLevel * 0.2;
+  d += (noise(p * 2.2 + vec3(0.0, uFlow * 1.3, uFlow * 0.9)) - 0.5) * uLevel * 0.16;
   return d;
 }
 
@@ -112,12 +112,16 @@ void main() {
     float t = b - sqrt(h);
     float tEnd = b + sqrt(h);
     bool hit = false;
-    for (int i = 0; i < 80; i++) {
-      float d = map(ro + rd * t);
+    float d = 1.0;
+    for (int i = 0; i < 96; i++) {
+      d = map(ro + rd * t);
       if (d < 0.0008 * t) { hit = true; break; }
-      t += d * 0.8;
+      t += d * mix(0.8, 0.6, uLevel); // the level swells break the distance bound a little
       if (t > tEnd) break;
     }
+    // A ray grazing a swell can run out of steps just above the surface;
+    // counting it as a miss leaves a dark seam inside the silhouette.
+    hit = hit || (d < 0.01 && t < tEnd);
     if (hit) {
       vec3 p = ro + rd * t;
       vec3 n = normalAt(p);
@@ -130,10 +134,11 @@ void main() {
       vec3 metal = refl * mix(uColor * 0.95 + 0.05, vec3(1.0), max(fres, hot)) * mix(0.4, 1.0, fres);
       // Inner glow seen through the shell: a soft core plus slow lava shapes
       // sampled a little inside the surface, so they move with some depth.
-      float chord = sqrt(max(1.0 - (closest * closest) / (r * r), 0.0));
+      // ndv follows the deformed surface, so the core has no circular edge.
+      float core = ndv * ndv;
       vec3 q = p + rd * r * 0.45;
       float lava = smoothstep(0.45, 0.78, noise(q * 1.6 + vec3(0.0, -uFlow * 0.6, uFlow * 0.25)));
-      vec3 inner = uColor * uGlow * (0.01 + 0.16 * chord * chord * chord + 0.45 * lava * chord * chord);
+      vec3 inner = uColor * uGlow * (0.01 + 0.16 * core * ndv + 0.45 * lava * core);
       float alpha = mix(0.6, 1.0, fres);
       col = col * (1.0 - alpha) + metal + inner;
     }
