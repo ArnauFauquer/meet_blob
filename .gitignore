@@ -17,7 +17,7 @@ web/dist/
 # personal voice recordings
 **/tests/clips/
 **/clips/
-# downloaded models
-models/
-*.onnx
+# downloaded model caches (the wake-word models under web/public/models are committed)
+/models/
+/data/
 *.bin
