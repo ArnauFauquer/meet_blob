@@ -48,7 +48,7 @@ float radius() {
 }
 
 // A sphere with three soft lobes drifting under its surface (lava-lamp bulges)
-// and a slow noise displacement. The level adds finer ripples.
+// and a slow noise displacement. The level adds larger, faster swells.
 float sphereShape(vec3 p) {
   float r = radius();
   float d = length(p) - r;
@@ -59,7 +59,7 @@ float sphereShape(vec3 p) {
     d = smin(d, length(p - c) - r * 0.62, 0.32);
   }
   d += (noise(p * 1.7 + vec3(0.0, uFlow * 0.5, uFlow * 0.3)) - 0.5) * uAmp * 0.7;
-  d += (noise(p * 4.5 + vec3(uFlow * 1.7)) - 0.5) * uLevel * 0.14;
+  d += (noise(p * 2.2 + vec3(0.0, uFlow * 1.3, uFlow * 0.9)) - 0.5) * uLevel * 0.2;
   return d;
 }
 
@@ -103,7 +103,7 @@ void main() {
   float b = -dot(ro, rd); // ray distance to the point closest to the centre
   float closest = length(ro + rd * b);
   vec3 col = vec3(0.0003, 0.0003, 0.0006);
-  col += uColor * uGlow * 0.03 * exp(-max(closest - r, 0.0) * 4.5);
+  col += uColor * uGlow * 0.022 * exp(-max(closest - r, 0.0) * 5.0);
 
   // Bounding sphere: rays that miss it skip the march.
   float rb = r * 1.5 + 0.1;
@@ -127,7 +127,7 @@ void main() {
       // Strong highlights go towards white, as on real metal.
       vec3 refl = env(reflect(rd, n));
       float hot = smoothstep(0.4, 2.0, dot(refl, vec3(0.3, 0.5, 0.2)));
-      vec3 metal = refl * mix(uColor * 0.85 + 0.15, vec3(1.0), max(fres, hot)) * mix(0.4, 1.0, fres);
+      vec3 metal = refl * mix(uColor * 0.95 + 0.05, vec3(1.0), max(fres, hot)) * mix(0.4, 1.0, fres);
       // Inner glow seen through the shell: a soft core plus slow lava shapes
       // sampled a little inside the surface, so they move with some depth.
       float chord = sqrt(max(1.0 - (closest * closest) / (r * r), 0.0));

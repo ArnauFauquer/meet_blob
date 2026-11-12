@@ -3,7 +3,7 @@
 // all connections. The device name picks a scenario for flows a real backend
 // cannot be told to produce:
 //   empty, hermes_fail, tts_fail, not_ready, version (hello_ok with another
-//   version), slow (5 s thinking), drop (the first socket is killed after hello_ok).
+//   version), slow (5 s thinking, 8 s reply), drop (the first socket is killed after hello_ok).
 // Any other name is a normal turn. Run: node e2e/mock-backend.ts (PORT, MOCK_TOKEN, MOCK_STATIC).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -18,7 +18,8 @@ const STATIC = process.env.MOCK_STATIC ?? fileURLToPath(new URL('../dist', impor
 const MAX_FRAME = 1 << 20;
 
 const REPLY = wav(speechLike(24000, 2.5, 0.2), 24000);
-const FALLBACK = wav(speechLike(24000, 1.5, 0.1, 180), 24000);
+const LONG_REPLY = wav(speechLike(24000, 8, 0.2), 24000);
+const FALLBACK = wav(speechLike(24000, 3.5, 0.1, 180), 24000); // about one spoken sentence
 
 interface Conn {
   ws: WebSocket;
@@ -82,7 +83,7 @@ async function runTurn(t: Turn, durMs: number) {
     return finish(t, 'hermes_fail');
   }
   setConv('speaking', t.id);
-  sendBinary(t.conn, { type: 'tts', turn: t.id, alert: null, seq: 0, final: true, followup: false }, REPLY);
+  sendBinary(t.conn, { type: 'tts', turn: t.id, alert: null, seq: 0, final: true, followup: false }, scenario === 'slow' ? LONG_REPLY : REPLY);
   finish(t, 'ok');
 }
 
