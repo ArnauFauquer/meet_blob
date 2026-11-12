@@ -1,0 +1,14 @@
+# Allow-list: only what the Dockerfile copies goes into the build context.
+*
+!backend/pyproject.toml
+!backend/uv.lock
+!backend/.python-version
+!backend/blob/
+!web/
+web/node_modules
+web/dist
+**/__pycache__
+**/*.pyc
+**/.env
+**/tests/clips/
+**/clips/

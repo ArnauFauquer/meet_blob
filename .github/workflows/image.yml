@@ -1,0 +1,58 @@
+# Builds the Blob image (Dockerfile at the repo root) and pushes it to ghcr.io.
+# Tags: sha-<7-char commit> (immutable, pinned by the home_lab chart) and latest.
+# Tests run in ci.yml; this workflow only builds and publishes.
+name: image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - backend/**
+      - web/**
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # ghcr names must be lowercase.
+  IMAGE: ghcr.io/arnaufauquer/meet_blob
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
