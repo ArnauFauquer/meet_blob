@@ -1,0 +1,23 @@
+# secrets and local state
+.env
+*.db
+*.sqlite
+# third-party pages saved for the design review (not ours to publish)
+review_context/
+# python
+__pycache__/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+# node
+node_modules/
+web/dist/
+# personal voice recordings
+**/tests/clips/
+**/clips/
+# downloaded models
+models/
+*.onnx
+*.bin
