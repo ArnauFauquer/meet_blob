@@ -200,6 +200,8 @@ CLIENT_MESSAGES: tuple[type[BaseModel], ...] = (
 # HTTP: the alerts API (S4)
 
 AlertKey = Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,64}$")]
+MAX_EPOCH = 10**11  # bounds keep NaN, infinity and huge numbers out of SQLite (422 instead)
+MAX_SPAN_S = 10**9
 
 
 class AlertIn(BaseModel):
@@ -213,21 +215,25 @@ class AlertIn(BaseModel):
     lang: str = Field(default="es", min_length=1, max_length=16)
     # Epoch seconds or RFC3339 with an offset. Strict numbers: a bool is not an epoch.
     fire_at: StrictInt | StrictFloat | str | None = None
-    in_s: StrictInt | StrictFloat | None = None
-    ttl_s: int | None = Field(default=None, gt=0)
+    in_s: StrictInt | StrictFloat | None = Field(default=None, ge=-MAX_SPAN_S, le=MAX_SPAN_S)
+    ttl_s: int | None = Field(default=None, gt=0, le=MAX_SPAN_S)
 
     @field_validator("fire_at")
     @classmethod
     def _epoch(cls, v: int | float | str | None) -> int | float | None:
-        if not isinstance(v, str):
+        if v is None:
             return v
-        try:
-            dt = datetime.fromisoformat(v)
-        except ValueError as e:
-            raise ValueError("fire_at must be epoch seconds or RFC3339") from e
-        if dt.tzinfo is None:
-            raise ValueError("fire_at needs a UTC offset")
-        return dt.timestamp()
+        if isinstance(v, str):
+            try:
+                dt = datetime.fromisoformat(v)
+            except ValueError as e:
+                raise ValueError("fire_at must be epoch seconds or RFC3339") from e
+            if dt.tzinfo is None:
+                raise ValueError("fire_at needs a UTC offset")
+            v = dt.timestamp()
+        if not 0 <= v <= MAX_EPOCH:  # also false for NaN
+            raise ValueError("fire_at out of range")
+        return v
 
     @model_validator(mode="after")
     def _one_time(self) -> Self:

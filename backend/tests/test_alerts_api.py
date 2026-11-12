@@ -105,6 +105,10 @@ def test_timer_source_defaults_to_urgent(api: TestClient) -> None:
         {"key": "k", "source": "s", "text": "t", "in_s": "60"},
         {"key": "k", "source": "s", "text": "t", "ttl_s": 0},
         {"key": "k", "source": "s", "text": "t", "fire_in": 60},  # unknown field
+        {"key": "k", "source": "s", "text": "t", "in_s": 1e300},
+        {"key": "k", "source": "s", "text": "t", "fire_at": 1e300},
+        {"key": "k", "source": "s", "text": "t", "fire_at": -1},
+        {"key": "k", "source": "s", "text": "t", "ttl_s": 10**30},
     ],
 )
 def test_422(api: TestClient, body: dict[str, Any]) -> None:

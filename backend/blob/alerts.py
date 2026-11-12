@@ -144,8 +144,8 @@ class Alerts:
                 created_at=old.created_at if old else int(now),
                 activated_at=activated_at,
             )
+            await self._write([a], [])  # first, so a failed write leaves the mirror unchanged
             self.rows[a.key] = a
-            await self._write([a], [])
         await self._on_change()
         return a, old is None
 
