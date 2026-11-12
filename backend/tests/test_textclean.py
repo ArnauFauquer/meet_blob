@@ -1,6 +1,6 @@
 import pytest
 
-from blob.textclean import clean_for_speech, truncate_for_speech
+from blob.textclean import clean_for_speech, ends_with_question, truncate_for_speech
 
 
 @pytest.mark.parametrize(
@@ -40,3 +40,21 @@ def test_cut_hard_without_space() -> None:
 
 def test_decimal_point_is_not_a_sentence_end() -> None:
     assert truncate_for_speech("Vale 3.5 euros y algo más", 15) == ("Vale 3.5 euros", True)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("¿Apago las luces del salón?", True),
+        ("Shall I?  ", True),
+        ('Did he say "really?"', True),
+        ("¿Seguro?»", True),
+        ("¿Qué quieres? (dímelo)", False),
+        ("Vale. ¿Algo más?\n", True),
+        ("Hecho.", False),
+        ("¿Pregunta? No, ya está.", False),
+        ("", False),
+    ],
+)
+def test_ends_with_question(text: str, expected: bool) -> None:
+    assert ends_with_question(text) is expected

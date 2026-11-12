@@ -18,7 +18,9 @@ from .gpu import Gpu
 from .hermes import HermesTimeout
 from .schemas import ConvState, Reason, TimeoutKind, Timings, Tts, TurnDone
 from .stt import SttResult, is_empty
-from .textclean import clean_for_speech, truncate_for_speech
+from .textclean import clean_for_speech, ends_with_question, truncate_for_speech
+from .timer_rule import TimerRequest
+from .timer_rule import match as match_timer
 from .turnlog import emit, record_turn
 
 log = logging.getLogger(__name__)
@@ -37,6 +39,9 @@ class Asker(Protocol):
 SttFn = Callable[[NDArray[np.float32]], SttResult]
 TtsFn = Callable[[str, str | None], bytes]
 FallbackFn = Callable[[str | None], bytes]
+TimerFn = Callable[[TimerRequest], Awaitable[None]]
+
+CHAIN_IDLE_S = 10  # the follow-up chain resets after this much idle time
 
 
 @dataclass(eq=False)
@@ -75,6 +80,8 @@ class TurnManager:
         tts_max_chars: int,
         listen_watchdog_s: float,
         turn_watchdog_s: float,
+        followup_max: int = 3,
+        create_timer: TimerFn | None = None,
         clock: Callable[[], float] = time.monotonic,
         wall: Callable[[], float] = time.time,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
@@ -85,8 +92,12 @@ class TurnManager:
         self._no_speech_max, self._max_chars = no_speech_max, tts_max_chars
         self._listen_s, self._turn_s = listen_watchdog_s, turn_watchdog_s
         self._clock, self._wall, self._sleep = clock, wall, sleep
+        self._followup_max, self._create_timer = followup_max, create_timer
         self._ids = itertools.count(1)
         self.current: Turn | None = None
+        # Follow-up chain: replies flagged followup in a row, and when the last turn ended.
+        self._chain = 0
+        self._last_end = float("-inf")
 
     @property
     def conv(self) -> ConvState:
@@ -100,6 +111,8 @@ class TurnManager:
         """Take the turn lock and enter listening. None means busy."""
         if self.current is not None:
             return None
+        if self._clock() - self._last_end > CHAIN_IDLE_S:
+            self._chain = 0
         turn = Turn(id=next(self._ids), owner=owner, ts=int(self._wall()))
         self.current = turn
         await self._on_change()
@@ -147,6 +160,10 @@ class TurnManager:
         if t is not None and t.owner is owner:
             await self._finish(t, Reason.CANCEL)
 
+    async def synth(self, text: str, lang: str | None) -> bytes:
+        """Speak a text outside a turn (alert_read), under the same GPU lock."""
+        return await self._gpu.run(self._tts, text, lang)
+
     async def _listen_watchdog(self, t: Turn) -> None:
         await self._sleep(self._listen_s)
         await self._finish(t, Reason.TIMEOUT, TimeoutKind.LISTEN)
@@ -171,17 +188,20 @@ class TurnManager:
         if is_empty(result, self._no_speech_max):
             return await self._finish(t, Reason.EMPTY)
 
-        start = self._clock()
-        try:
-            reply = await self._hermes.ask(result.text)
-        except HermesTimeout:
+        reply = await self._timer_reply(t, result.text)
+        if reply is None:
+            start = self._clock()
+            try:
+                reply = await self._hermes.ask(result.text)
+            except HermesTimeout:
+                t.timings.hermes_ms = _ms(self._clock() - start)
+                fallback = self._fallback(t.lang)
+                return await self._finish(t, Reason.TIMEOUT, TimeoutKind.HERMES, fallback)
+            except Exception as e:
+                log.warning("hermes failed (turn %s): %r", t.id, e)
+                t.timings.hermes_ms = _ms(self._clock() - start)
+                return await self._finish(t, Reason.HERMES_FAIL, audio=self._fallback(t.lang))
             t.timings.hermes_ms = _ms(self._clock() - start)
-            return await self._finish(t, Reason.TIMEOUT, TimeoutKind.HERMES, self._fallback(t.lang))
-        except Exception as e:
-            log.warning("hermes failed (turn %s): %r", t.id, e)
-            t.timings.hermes_ms = _ms(self._clock() - start)
-            return await self._finish(t, Reason.HERMES_FAIL, audio=self._fallback(t.lang))
-        t.timings.hermes_ms = _ms(self._clock() - start)
 
         cleaned = clean_for_speech(reply)
         t.reply_text, cut = truncate_for_speech(cleaned, self._max_chars)
@@ -200,6 +220,21 @@ class TurnManager:
         t.timings.tts_ms = _ms(self._clock() - start)
         await self._finish(t, Reason.OK, audio=wav)
 
+    async def _timer_reply(self, t: Turn, text: str) -> str | None:
+        """The timer rule: create the timer and return the confirmation, or None for Hermes."""
+        if self._create_timer is None:
+            return None
+        req = match_timer(text, t.lang, self._wall())
+        if req is None:
+            return None
+        try:
+            await self._create_timer(req)
+        except Exception:
+            log.exception("timer rule could not create %s; asking Hermes", req.key)
+            return None
+        emit({"kind": "timer_rule", "turn": t.id, "key": req.key, "in_s": req.in_s})
+        return req.reply
+
     async def _finish(
         self,
         t: Turn,
@@ -215,6 +250,12 @@ class TurnManager:
         for task in (t.task, t.watchdog):
             if task is not None and task is not me:
                 task.cancel()
+        question = reason is Reason.OK and ends_with_question(t.reply_text)
+        followup = question and self._chain < self._followup_max
+        if not question:
+            self._chain = 0  # a turn that does not end with "?" ends the chain
+        elif followup:
+            self._chain += 1
         if audio is not None:
             t.conv = ConvState.SPEAKING
             await self._on_change()
@@ -222,10 +263,11 @@ class TurnManager:
                 first = _ms(self._clock() - t.utt_at)
                 t.timings.first_audio_ms = first
                 t.timings.sc1_ms = first + t.tail_silence_ms
-            await t.owner.send(Tts(turn=t.id, seq=0, final=True), audio)
+            await t.owner.send(Tts(turn=t.id, seq=0, final=True, followup=followup), audio)
         await t.owner.send(TurnDone(turn=t.id, reason=reason, timeout_kind=kind, timings=t.timings))
         if self.current is t:
             self.current = None
+        self._last_end = self._clock()
         await self._on_change()
         await record_turn(
             self._db,

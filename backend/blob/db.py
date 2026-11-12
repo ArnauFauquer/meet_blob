@@ -8,7 +8,9 @@ from pathlib import Path
 
 from .schemas import Timings
 
-SCHEMA_VERSION = 1
+# 1: turns (S1). 2: alerts (S4). A new version only adds tables or columns, so an older image
+# still opens a newer file.
+SCHEMA_VERSION = 2
 
 _TURNS = """
 CREATE TABLE IF NOT EXISTS turns (
@@ -23,6 +25,37 @@ CREATE TABLE IF NOT EXISTS turns (
 )
 """
 
+_ALERTS = """
+CREATE TABLE IF NOT EXISTS alerts (
+    key TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    urgency TEXT NOT NULL,
+    text TEXT NOT NULL,
+    lang TEXT NOT NULL,
+    state TEXT NOT NULL,
+    fire_at INTEGER,
+    ttl_s INTEGER,
+    late INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    activated_at INTEGER,
+    acked_at INTEGER
+)
+"""
+ALERT_COLUMNS = (
+    "key",
+    "source",
+    "urgency",
+    "text",
+    "lang",
+    "state",
+    "fire_at",
+    "ttl_s",
+    "late",
+    "created_at",
+    "activated_at",
+    "acked_at",
+)
+
 
 class Db:
     def __init__(self, path: str) -> None:
@@ -32,6 +65,7 @@ class Db:
         self._lock = threading.Lock()
         with self._lock, self._conn:
             self._conn.execute(_TURNS)
+            self._conn.execute(_ALERTS)
             # A newer file keeps its version: later versions only add tables or columns.
             if self.user_version() < SCHEMA_VERSION:
                 self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -88,6 +122,22 @@ class Db:
         for row in rows:
             row["timings"] = json.loads(str(row["timings"]))
         return rows
+
+    def load_alerts(self) -> list[dict[str, object]]:
+        with self._lock:
+            cur = self._conn.execute(f"SELECT {', '.join(ALERT_COLUMNS)} FROM alerts")
+            return [dict(zip(ALERT_COLUMNS, row, strict=True)) for row in cur.fetchall()]
+
+    def _write_alerts(self, save: list[dict[str, object]], delete: list[str]) -> None:
+        cols = ", ".join(ALERT_COLUMNS)
+        marks = ", ".join(f":{c}" for c in ALERT_COLUMNS)
+        with self._lock, self._conn:
+            self._conn.executemany(f"INSERT OR REPLACE INTO alerts ({cols}) VALUES ({marks})", save)
+            self._conn.executemany("DELETE FROM alerts WHERE key = ?", [(k,) for k in delete])
+
+    async def write_alerts(self, save: list[dict[str, object]], delete: list[str]) -> None:
+        """Upsert and delete alert rows in one transaction."""
+        await asyncio.to_thread(self._write_alerts, save, delete)
 
     def close(self) -> None:
         # Under the lock: closing while a worker thread writes crashes sqlite3 (seen at shutdown).

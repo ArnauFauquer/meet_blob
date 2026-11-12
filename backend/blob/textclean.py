@@ -15,6 +15,7 @@ _EMOJI = re.compile(
 )
 _SPACE = re.compile(r"\s+")
 _SENTENCE_END = re.compile(r"[.!?…](?=\s|$)")
+_TRAILING_QUOTES = "\"'»”\u2019)] \t\n"
 
 
 def clean_for_speech(text: str) -> str:
@@ -43,3 +44,8 @@ def truncate_for_speech(text: str, max_chars: int) -> tuple[str, bool]:
         return head[: ends[-1]].strip(), True
     space = head.rfind(" ")
     return (head[:space] if space > 0 else head).strip(), True
+
+
+def ends_with_question(text: str) -> bool:
+    """True when the text ends with "?", ignoring trailing quotes, brackets and whitespace."""
+    return text.rstrip(_TRAILING_QUOTES).endswith("?")

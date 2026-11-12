@@ -43,11 +43,17 @@ class Settings(BaseSettings):
     # S2: devices and tokens
     devices_path: str = "config/devices.json"
     device_token: str = Field(min_length=1)
+    alert_token: str = Field(min_length=1)
 
-    # Served by GET /device-config for the page (the features that use them are S3 and S4).
+    # S3: follow-up chain guard (server); the listening limits are served to the page.
+    followup_max: int = Field(3, ge=0)
     followup_listen_s: float = Field(6, gt=0)
     listen_no_speech_s: float = Field(8, gt=0)
+    # S4: read by the page from GET /device-config.
     quiet_hours: str = ""
+    # S4: the local timer rule before Hermes (on/off). Turn it off once Hermes creates timers
+    # itself through POST /alerts.
+    timer_rule: bool = True
 
     # Development switch: canned transcript and tone audio instead of the speech models.
     blob_fake_models: bool = False

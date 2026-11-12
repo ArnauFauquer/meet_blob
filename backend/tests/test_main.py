@@ -81,6 +81,7 @@ def test_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         "HERMES_KEY": "k",
         "HERMES_MODEL": "m",
         "DEVICE_TOKEN": "t",
+        "ALERT_TOKEN": "a",
         "PORT": "8123",
         "DB_PATH": str(tmp_path / "b.db"),
         "DEVICES_PATH": str(tmp_path / "d.json"),

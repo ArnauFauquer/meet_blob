@@ -12,8 +12,8 @@ from blob import __version__, schemas
 PROTOCOL = json.loads(
     (Path(__file__).resolve().parents[2] / "protocol" / "messages.json").read_text()
 )
-# Messages of later slices that are not built yet (S3: wake; S4: alerts).
-NOT_BUILT = {"wake", "alert_read", "alert_ack"}
+# Messages of later slices that are not built yet (none since S3 and S4).
+NOT_BUILT: set[str] = set()
 
 
 def _name(model: type[BaseModel]) -> str:
@@ -96,3 +96,19 @@ def test_utterance_rate_number_or_string(rate: str, ok: bool) -> None:
     else:
         with pytest.raises(ValueError):
             schemas.client_message.validate_json(raw)
+
+
+def test_s3_s4_client_messages() -> None:
+    wake = schemas.client_message.validate_json('{"type":"wake"}')
+    assert isinstance(wake, schemas.Wake) and wake.followup is False
+    read = schemas.client_message.validate_json('{"type":"alert_read","key":"k"}')
+    assert isinstance(read, schemas.AlertRead) and read.key == "k"
+    ack = schemas.client_message.validate_json('{"type":"alert_ack","key":"k"}')
+    assert isinstance(ack, schemas.AlertAck)
+    with pytest.raises(ValueError):
+        schemas.client_message.validate_json('{"type":"alert_read"}')
+
+
+def test_alert_out_matches_documented_response() -> None:
+    # POST /alerts and GET /alerts return {key, state, fire_at} (design, alerts contract).
+    assert set(schemas.AlertOut.model_fields) == {"key", "state", "fire_at"}

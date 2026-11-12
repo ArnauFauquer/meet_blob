@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, Protocol
@@ -19,6 +19,8 @@ from numpy.typing import NDArray
 from starlette.responses import Response
 from starlette.types import Scope
 
+from . import alerts
+from .alerts import Alerts, run_scheduler
 from .auth import require_device_token
 from .config import Settings
 from .db import Db
@@ -86,6 +88,7 @@ def create_app(
     *,
     models: tuple[SttModel, TtsModel] | None = None,
     hermes_transport: httpx.AsyncBaseTransport | None = None,
+    wall: Callable[[], float] = time.time,
 ) -> FastAPI:
     devices = load_devices(settings.devices_path)  # a malformed file stops startup here
     stt, tts = models or _models(settings)
@@ -103,7 +106,9 @@ def create_app(
             settings.session_idle_s,
             transport=hermes_transport,
         )
-        st.hub = Hub(settings.device_token, lambda: st.ready)
+        st.hub = Hub(settings.device_token, lambda: st.ready, devices)
+        st.alerts = st.hub.alerts = Alerts(st.db, st.hub.broadcast_snapshot, wall)
+        await st.alerts.load()  # overdue timers fire once, marked late
         st.hub.turns = TurnManager(
             stt=stt,
             tts=tts,
@@ -116,8 +121,12 @@ def create_app(
             tts_max_chars=settings.tts_max_chars,
             listen_watchdog_s=settings.listen_watchdog_s,
             turn_watchdog_s=settings.turn_watchdog_s,
+            followup_max=settings.followup_max,
+            create_timer=st.alerts.create_timer if settings.timer_rule else None,
+            wall=wall,
         )
         tasks = [
+            asyncio.create_task(run_scheduler(st.alerts)),
             asyncio.create_task(_load_models(app, stt, tts)),
             asyncio.create_task(_check_hermes(app)),
             asyncio.create_task(_retention(app, settings.retention_days)),
@@ -161,6 +170,8 @@ def create_app(
             listen_no_speech_s=settings.listen_no_speech_s,
             silence_rms=settings.silence_rms,
         )
+
+    app.include_router(alerts.router)
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket) -> None:
