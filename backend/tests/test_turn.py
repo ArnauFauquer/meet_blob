@@ -97,6 +97,7 @@ class Rig:
         tts: Callable[[str, str | None], bytes] | None = None,
         hermes: Hermes | None = None,
         tts_max_chars: int = 1200,
+        **extra: Any,
     ) -> None:
         self.clock, self.sleeps = Clock(), Sleeps()
         self.hermes = hermes or Hermes()
@@ -121,6 +122,7 @@ class Rig:
             clock=self.clock,
             wall=lambda: 1_700_000_000.0,
             sleep=self.sleeps,
+            **extra,
         )
         self.owner = Owner()
 
@@ -440,3 +442,128 @@ async def test_ids_increase() -> None:
     assert (await r.run_turn()).turn == 1
     r.owner = Owner()
     assert (await r.run_turn()).turn == 2
+
+
+# S3: follow-up flag and chain guard
+
+
+def followups(r: Rig) -> list[bool]:
+    return [m.followup for m, _ in r.owner.sent if isinstance(m, Tts)]
+
+
+async def flag(r: Rig, pcm: bytes = PCM) -> bool | None:
+    """Run one turn with a fresh owner; the tts followup flag, or None when nothing was spoken."""
+    r.owner = Owner()
+    await r.run_turn(pcm=pcm)
+    return followups(r)[0] if followups(r) else None
+
+
+async def test_reply_ending_with_question_sets_followup() -> None:
+    r = Rig(hermes=Hermes("¿Apago las **luces** del salón? 🙂"))
+    done = await r.run_turn()
+    assert done.reason is Reason.OK and followups(r) == [True]
+
+
+async def test_reply_without_question_has_no_followup() -> None:
+    r = Rig()
+    await r.run_turn()
+    assert followups(r) == [False]
+
+
+async def test_followup_chain_is_capped() -> None:
+    r = Rig(hermes=Hermes("¿Seguro?"), followup_max=3)
+    got = []
+    for _ in range(5):
+        got.append(await flag(r))
+        r.clock.now += 3  # the follow-up starts within 10 s
+    assert got == [True, True, True, False, False]
+
+
+async def test_chain_resets_on_a_reply_without_question() -> None:
+    r = Rig(hermes=Hermes("¿Seguro?"), followup_max=2)
+    got = [await flag(r), await flag(r), await flag(r)]  # the third is capped
+    r.hermes.reply = "Hecho."
+    got.append(await flag(r))
+    r.hermes.reply = "¿Algo más?"
+    got.append(await flag(r))
+    assert got == [True, True, False, False, True]
+
+
+async def test_chain_resets_on_an_empty_turn() -> None:
+    r = Rig(hermes=Hermes("¿Seguro?"), followup_max=1)
+    got = [await flag(r), await flag(r, pcm=b""), await flag(r)]
+    assert got == [True, None, True]  # nobody answered the follow-up: the chain ended
+
+
+async def test_chain_resets_after_10_s_idle() -> None:
+    r = Rig(hermes=Hermes("¿Seguro?"), followup_max=1)
+    got = [await flag(r)]
+    r.clock.now += 5
+    got.append(await flag(r))  # capped: within 10 s
+    r.clock.now += 10.5
+    got.append(await flag(r))  # more than 10 s idle: a new chain
+    assert got == [True, False, True]
+
+
+async def test_fallback_never_asks_for_followup() -> None:
+    r = Rig(hermes=Hermes(HermesFail("down")))
+    await r.run_turn()
+    assert followups(r) == [False]
+
+
+# S4: timer rule before Hermes
+
+
+class Timers:
+    def __init__(self, fail: bool = False) -> None:
+        self.created: list[Any] = []
+        self.fail = fail
+
+    async def __call__(self, req: Any) -> None:
+        if self.fail:
+            raise RuntimeError("database locked")
+        self.created.append(req)
+
+
+async def test_timer_rule_skips_hermes() -> None:
+    timers = Timers()
+    r = Rig(
+        stt=lambda _a: SttResult("Pon un temporizador de 10 minutos.", "es", 0.0),
+        create_timer=timers,
+    )
+    done = await r.run_turn()
+    assert done.reason is Reason.OK and r.hermes.calls == []
+    [req] = timers.created
+    assert (req.key, req.in_s, req.lang) == ("timer-1700000000", 600, "es")
+    assert r.tts_texts == [("Vale, temporizador de 10 minutos.", "es")]
+    assert done.timings.hermes_ms is None and done.timings.first_audio_ms is not None
+    assert followups(r) == [False]
+    assert r.db.turns()[0]["reply_text"] == "Vale, temporizador de 10 minutos."
+
+
+async def test_timer_rule_off_asks_hermes() -> None:
+    r = Rig(stt=lambda _a: SttResult("pon un temporizador de 10 minutos", "es", 0.0))
+    await r.run_turn()
+    assert r.hermes.calls == ["pon un temporizador de 10 minutos"]
+
+
+async def test_no_match_asks_hermes() -> None:
+    timers = Timers()
+    r = Rig(create_timer=timers)
+    await r.run_turn()
+    assert timers.created == [] and r.hermes.calls == ["¿Qué hora es?"]
+
+
+async def test_timer_creation_failure_asks_hermes() -> None:
+    r = Rig(
+        stt=lambda _a: SttResult("set a timer for 5 minutes", "en", 0.0),
+        create_timer=Timers(fail=True),
+    )
+    done = await r.run_turn()
+    assert done.reason is Reason.OK and r.hermes.calls == ["set a timer for 5 minutes"]
+
+
+async def test_synth_for_alert_read() -> None:
+    r = Rig()
+    assert await r.tm.synth("Fin del temporizador", "es") == WAV
+    assert r.tts_texts == [("Fin del temporizador", "es")]

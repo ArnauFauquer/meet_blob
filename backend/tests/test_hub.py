@@ -4,6 +4,7 @@ import json
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -14,15 +15,20 @@ from starlette.websockets import WebSocketDisconnect
 
 from blob import __version__
 from blob.fakes import FakeStt, FakeTts
-from tests.conftest import TOKEN, wait_ready
+from tests.conftest import ALERT_TOKEN, TOKEN, wait_ready
 from tests.fakes.fake_hermes import FakeHermes
 
 SPEECH = (np.ones(16000, dtype="<i2") * 3000).tobytes()  # 1 s, loud enough for FakeStt
 SILENCE = bytes(32000)
 
 
-def hello(ws: WebSocketTestSession, token: str = TOKEN, version: str = __version__) -> None:
-    ws.send_json({"type": "hello", "version": version, "token": token, "device": "desktop"})
+def hello(
+    ws: WebSocketTestSession,
+    token: str = TOKEN,
+    version: str = __version__,
+    device: str = "desktop",
+) -> None:
+    ws.send_json({"type": "hello", "version": version, "token": token, "device": device})
 
 
 def recv(ws: WebSocketTestSession) -> Any:
@@ -43,16 +49,16 @@ def until(ws: WebSocketTestSession, type_: str) -> list[Any]:
 
 
 @contextmanager
-def connect(client: TestClient) -> Iterator[WebSocketTestSession]:
+def connect(client: TestClient, device: str = "desktop") -> Iterator[WebSocketTestSession]:
     with client.websocket_connect("/ws") as ws:
-        hello(ws)
+        hello(ws, device=device)
         assert recv(ws) == {"type": "hello_ok", "version": __version__, "ok": True}
         assert recv(ws) == {"type": "snapshot", "conv": "idle", "alerts": []}
         yield ws
 
 
-def tap(ws: WebSocketTestSession) -> int:
-    ws.send_json({"type": "tap"})
+def tap(ws: WebSocketTestSession, msg: dict[str, Any] | None = None) -> int:
+    ws.send_json(msg or {"type": "tap"})
     state = until(ws, "state")[-1]
     while state["conv"] == "idle":  # the end of the previous turn
         state = until(ws, "state")[-1]
@@ -279,3 +285,222 @@ def test_not_ready(app_factory: Any) -> None:
         wait_ready(c)
         with connect(c) as ws:
             assert tap(ws) == 1
+
+
+# S3: wake
+
+
+@pytest.fixture
+def wake_client(app_factory: Any, tmp_path: Path) -> Iterator[TestClient]:
+    (tmp_path / "devices.json").write_text(
+        json.dumps({"tablet": {"sound": True, "wake": True}, "desktop": {"wake": False}})
+    )
+    with TestClient(app_factory()) as c:
+        wait_ready(c)
+        yield c
+
+
+@pytest.mark.parametrize("device", ["desktop", "unknown"])
+def test_wake_refused_without_wake_flag(wake_client: TestClient, device: str) -> None:
+    with connect(wake_client, device) as ws:
+        for msg in ({"type": "wake"}, {"type": "wake", "followup": True}):
+            ws.send_json(msg)
+            assert recv(ws) == {"type": "error", "code": "bad_message"}
+        assert tap(ws) == 1  # tap still works
+
+
+def test_wake_starts_a_turn_like_tap(wake_client: TestClient, fake_hermes: FakeHermes) -> None:
+    with connect(wake_client, "tablet") as ws, connect(wake_client) as desk:
+        turn = tap(ws, {"type": "wake"})
+        until(desk, "snapshot")
+        desk.send_json({"type": "tap"})
+        assert recv(desk) == {"type": "error", "code": "busy"}
+        utterance(ws, turn, SPEECH)
+        assert until(ws, "turn_done")[-1]["reason"] == "ok"
+        followup = tap(ws, {"type": "wake", "followup": True})
+        assert followup == turn + 1
+        utterance(ws, followup, b"", dur_ms=0)  # page: no speech in the 6 s window
+        assert until(ws, "turn_done")[-1]["reason"] == "empty"
+        assert len(fake_hermes.requests) == 1
+
+
+def test_wake_busy(wake_client: TestClient) -> None:
+    with connect(wake_client, "tablet") as a, connect(wake_client, "tablet") as b:
+        tap(a)
+        until(b, "snapshot")
+        b.send_json({"type": "wake"})
+        assert recv(b) == {"type": "error", "code": "busy"}
+
+
+def test_followup_flag_over_the_socket(client: TestClient, fake_hermes: FakeHermes) -> None:
+    fake_hermes.mode = "question"
+    with connect(client) as ws:
+        utterance(ws, tap(ws), SPEECH)
+        tts = next(m for m in until(ws, "turn_done") if isinstance(m, dict) and m["type"] == "tts")
+        assert tts["followup"] is True
+
+
+# S4: alerts in the snapshot, alert_read, alert_ack
+
+
+def post_alert(c: TestClient, **body: Any) -> Any:
+    r = c.post("/alerts", json=body, headers={"Authorization": f"Bearer {ALERT_TOKEN}"})
+    assert r.status_code in (200, 201), r.text
+    return r.json()
+
+
+def test_alert_broadcast_to_every_client(client: TestClient) -> None:
+    with connect(client) as a, connect(client, "tablet") as b:
+        post_alert(client, key="door", source="homeassistant", text="Puerta", urgency="urgent")
+        for ws in (a, b):
+            snap = recv(ws)  # only a snapshot: state is for turn transitions
+            assert snap["type"] == "snapshot" and snap["conv"] == "idle"
+            [item] = snap["alerts"]
+            assert set(item) == {"key", "source", "urgency", "text", "lang", "late", "activated_at"}
+            assert (item["key"], item["source"], item["urgency"], item["late"]) == (
+                "door",
+                "homeassistant",
+                "urgent",
+                False,
+            )
+        client.delete("/alerts/door", headers={"Authorization": f"Bearer {ALERT_TOKEN}"})
+        assert recv(a) == {"type": "snapshot", "conv": "idle", "alerts": []}
+
+
+def test_snapshot_on_connect_lists_active_only(client: TestClient) -> None:
+    post_alert(client, key="on", source="s", text="t")
+    post_alert(client, key="later", source="timer", text="t", in_s=3600)
+    with client.websocket_connect("/ws") as ws:
+        hello(ws)
+        recv(ws)
+        assert [a["key"] for a in recv(ws)["alerts"]] == ["on"]
+
+
+def test_alert_read_then_ack(client: TestClient) -> None:
+    post_alert(client, key="wash", source="homeassistant", text="Lavadora lista", lang="es")
+    with connect_with_alerts(client) as ws, connect_with_alerts(client) as other:
+        ws.send_json({"type": "alert_read", "key": "wash"})
+        assert recv(ws) == {
+            "type": "tts",
+            "turn": None,
+            "alert": "wash",
+            "seq": 0,
+            "final": True,
+            "followup": False,
+        }
+        audio = recv(ws)
+        assert isinstance(audio, bytes) and audio[:4] == b"RIFF"
+        ws.send_json({"type": "alert_ack", "key": "wash"})
+        assert recv(ws) == {"type": "snapshot", "conv": "idle", "alerts": []}
+        assert recv(other) == {"type": "snapshot", "conv": "idle", "alerts": []}
+        ws.send_json({"type": "alert_read", "key": "wash"})  # acked: no longer readable
+        assert recv(ws) == {"type": "error", "code": "bad_message"}
+        ws.send_json({"type": "alert_ack", "key": "wash"})  # a second ack is ignored
+        ws.send_json({"type": "ping"})
+        assert recv(ws) == {"type": "pong"}
+    rows = client.get("/alerts", headers={"Authorization": f"Bearer {ALERT_TOKEN}"}).json()
+    assert rows == [{"key": "wash", "state": "acked", "fire_at": None}]
+
+
+def test_alert_read_uses_voice_for_lang(app_factory: Any) -> None:
+    class RecordingTts(FakeTts):
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str | None]] = []
+
+        def __call__(self, text: str, lang: str | None) -> bytes:
+            self.calls.append((text, lang))
+            return super().__call__(text, lang)
+
+    tts = RecordingTts()
+    with TestClient(app_factory(models=(FakeStt("x", "es", 0.01), tts))) as c:
+        wait_ready(c)
+        post_alert(c, key="k", source="s", text="Washing done", lang="en")
+        with connect_with_alerts(c) as ws:
+            ws.send_json({"type": "alert_read", "key": "k"})
+            until(ws, "tts")
+        assert tts.calls == [("Washing done", "en")]
+
+
+@contextmanager
+def connect_with_alerts(client: TestClient) -> Iterator[WebSocketTestSession]:
+    with client.websocket_connect("/ws") as ws:
+        hello(ws)
+        assert recv(ws)["type"] == "hello_ok"
+        assert recv(ws)["type"] == "snapshot"
+        yield ws
+
+
+def test_alert_read_bad_cases(client: TestClient) -> None:
+    post_alert(client, key="on", source="s", text="t")
+    post_alert(client, key="later", source="timer", text="t", in_s=3600)
+    with connect_with_alerts(client) as ws:
+        for key in ("missing", "later"):
+            ws.send_json({"type": "alert_read", "key": key})
+            assert recv(ws) == {"type": "error", "code": "bad_message"}
+        ws.send_json({"type": "tap"})
+        until(ws, "snapshot")
+        ws.send_json({"type": "alert_read", "key": "on"})  # during a turn
+        assert recv(ws) == {"type": "error", "code": "bad_message"}
+
+
+def test_alert_read_synthesis_failure(app_factory: Any) -> None:
+    class BrokenTts(FakeTts):
+        def __call__(self, text: str, lang: str | None) -> bytes:
+            raise RuntimeError("onnx")
+
+    with TestClient(app_factory(models=(FakeStt("x", "es", 0.01), BrokenTts()))) as c:
+        wait_ready(c)
+        post_alert(c, key="k", source="s", text="t")
+        with connect_with_alerts(c) as ws:
+            ws.send_json({"type": "alert_read", "key": "k"})
+            assert recv(ws) == {"type": "error", "code": "bad_message"}
+            ws.send_json({"type": "alert_ack", "key": "k"})  # the page keeps it: no ack sent
+
+
+def test_alert_read_not_ready(app_factory: Any) -> None:
+    stt = BlockedStt()
+    with TestClient(app_factory(models=(stt, FakeTts()))) as c:
+        try:
+            post_alert(c, key="k", source="s", text="t")
+            with connect_with_alerts(c) as ws:
+                ws.send_json({"type": "alert_read", "key": "k"})
+                assert recv(ws) == {"type": "error", "code": "not_ready"}
+        finally:
+            stt.release.set()
+
+
+def test_timer_fires_and_snapshot_changes(app_factory: Any) -> None:
+    with TestClient(app_factory()) as c:
+        wait_ready(c)
+        with connect(c) as ws:
+            assert post_alert(c, key="t", source="timer", text="Fin", in_s=1)["state"] == "pending"
+            assert recv(ws) == {"type": "snapshot", "conv": "idle", "alerts": []}
+            snap = recv(ws)  # within about 1 s plus the 250 ms scheduler cap
+            assert [(a["key"], a["urgency"], a["late"]) for a in snap["alerts"]] == [
+                ("t", "urgent", False)
+            ]
+
+
+def test_voice_timer_through_the_rule(app_factory: Any, fake_hermes: FakeHermes) -> None:
+    with TestClient(app_factory(blob_fake_transcript="pon un temporizador de 1 minuto")) as c:
+        wait_ready(c)
+        with connect(c) as ws:
+            utterance(ws, tap(ws), SPEECH)
+            msgs = until(ws, "turn_done")
+            assert msgs[-1]["reason"] == "ok" and msgs[-1]["timings"]["hermes_ms"] is None
+            assert any(isinstance(m, bytes) for m in msgs)
+        rows = c.get("/alerts", headers={"Authorization": f"Bearer {ALERT_TOKEN}"}).json()
+        [row] = rows
+        assert row["key"].startswith("timer-") and row["state"] == "pending"
+        assert fake_hermes.requests == []
+
+
+def test_timer_rule_off(app_factory: Any, fake_hermes: FakeHermes) -> None:
+    app = app_factory(blob_fake_transcript="pon un temporizador de 1 minuto", timer_rule=False)
+    with TestClient(app) as c:
+        wait_ready(c)
+        with connect(c) as ws:
+            utterance(ws, tap(ws), SPEECH)
+            assert until(ws, "turn_done")[-1]["reason"] == "ok"
+        assert c.get("/alerts", headers={"Authorization": f"Bearer {ALERT_TOKEN}"}).json() == []
+        assert len(fake_hermes.requests) == 1
