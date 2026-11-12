@@ -26,6 +26,7 @@ export default defineConfig({
       ...Object.fromEntries(proxied.map((p) => [p, backend])),
     },
   },
+  build: { chunkSizeWarningLimit: 800 }, // three.js alone is about 540 kB
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.ts'],
