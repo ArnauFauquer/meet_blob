@@ -6,7 +6,7 @@ export const FAULTS = {
   version: 'Page and server versions differ. Reload did not help.',
   socket_down: 'Offline. Reconnecting…',
   mic_denied: 'Microphone blocked.',
-  render: 'Graphics reset. Recovering…',
+  render: 'Graphics unavailable.', // context lost (recovers on restore) or no WebGL
   audio_locked: 'Audio locked. Tap to enable sound.',
 } as const;
 export type Fault = keyof typeof FAULTS;
