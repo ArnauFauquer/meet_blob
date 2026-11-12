@@ -78,15 +78,19 @@ class Db:
         return await asyncio.to_thread(self._delete_older, int(now - days * 86400))
 
     def turns(self) -> list[dict[str, object]]:
-        cur = self._conn.execute(
-            "SELECT turn_id, ts, lang, user_text, reply_text, reason, timeout_kind, timings"
-            " FROM turns ORDER BY turn_id"
-        )
-        cols = [c[0] for c in cur.description]
-        rows = [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT turn_id, ts, lang, user_text, reply_text, reason, timeout_kind, timings"
+                " FROM turns ORDER BY turn_id"
+            )
+            cols = [c[0] for c in cur.description]
+            rows = [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
         for row in rows:
             row["timings"] = json.loads(str(row["timings"]))
         return rows
 
     def close(self) -> None:
-        self._conn.close()
+        # Under the lock: closing while a worker thread writes crashes sqlite3 (seen at shutdown).
+        # Later calls raise sqlite3.ProgrammingError, which turnlog logs.
+        with self._lock:
+            self._conn.close()

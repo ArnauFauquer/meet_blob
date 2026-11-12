@@ -49,3 +49,14 @@ def test_reopen_keeps_rows(tmp_path: Path) -> None:
     db._insert_turn(1, "en", "a", "b", "ok", None, Timings())
     db.close()
     assert len(Db(path).turns()) == 1
+
+
+async def test_close_waits_for_a_running_write(tmp_path: Path) -> None:
+    import asyncio
+
+    db = Db(str(tmp_path / "blob.db"))
+    writes = [db.insert_turn(i, None, "", "", "ok", None, Timings()) for i in range(200)]
+    closer = asyncio.to_thread(db.close)
+    results = await asyncio.gather(*writes, closer, return_exceptions=True)
+    # Every write either landed before the close or failed cleanly after it; no crash.
+    assert all(r is None or isinstance(r, sqlite3.ProgrammingError) for r in results)
