@@ -1,30 +1,163 @@
 {
   "$comment": "Contract between backend and page. Source of truth: docs/designs/blob_design.md, section 'WebSocket protocol'. Every JSON message is an object with a string field 'type'. A message marked binary is followed, on the same socket, by exactly one WebSocket binary frame (the hub writes both under a lock, so nothing else comes between them).",
   "version": 1,
-  "close_codes": { "4400": "message before hello", "4401": "bad token (client must not retry)" },
-  "conv_states": ["idle", "listening", "thinking", "speaking"],
-  "turn_done_reasons": ["ok", "empty", "stt_fail", "hermes_fail", "timeout", "tts_fail", "cancel"],
-  "timeout_kinds": ["hermes", "turn", "listen"],
-  "error_codes": ["busy", "bad_message", "not_ready"],
-  "alert_item": { "key": "str", "source": "str", "urgency": "info|urgent", "text": "str", "lang": "str", "late": "bool", "activated_at": "int (UTC epoch s)" },
+  "close_codes": {
+    "4400": "message before hello",
+    "4401": "bad token (client must not retry)"
+  },
+  "conv_states": [
+    "idle",
+    "listening",
+    "thinking",
+    "speaking"
+  ],
+  "turn_done_reasons": [
+    "ok",
+    "empty",
+    "stt_fail",
+    "hermes_fail",
+    "timeout",
+    "tts_fail",
+    "cancel"
+  ],
+  "timeout_kinds": [
+    "hermes",
+    "turn",
+    "listen"
+  ],
+  "error_codes": [
+    "busy",
+    "bad_message",
+    "not_ready"
+  ],
+  "alert_item": {
+    "key": "str",
+    "source": "str",
+    "urgency": "info|urgent",
+    "text": "str",
+    "lang": "str",
+    "late": "bool",
+    "activated_at": "int (UTC epoch s)"
+  },
   "client_to_server": {
-    "hello":        { "slice": "S1", "fields": { "version": "str", "token": "str", "device": "str" } },
-    "tap":          { "slice": "S1", "fields": {} },
-    "utterance":    { "slice": "S1", "binary": "when dur_ms > 0: raw little-endian signed 16-bit mono PCM, 16000 Hz", "fields": { "turn": "int", "format": "pcm_s16le", "rate": "16000", "dur_ms": "int (0 = no speech)", "tail_silence_ms": "int" } },
-    "cancel":       { "slice": "S1", "fields": { "turn": "int" } },
-    "ping":         { "slice": "S1", "fields": {} },
-    "client_event": { "slice": "S1", "fields": { "kind": "str", "...": "free extra fields" } },
-    "wake":         { "slice": "S3", "fields": { "followup": "bool, default false" } },
-    "alert_read":   { "slice": "S4", "fields": { "key": "str" } },
-    "alert_ack":    { "slice": "S4", "fields": { "key": "str" } }
+    "hello": {
+      "slice": "S1",
+      "fields": {
+        "version": "str",
+        "token": "str",
+        "device": "str"
+      }
+    },
+    "tap": {
+      "slice": "S1",
+      "fields": {}
+    },
+    "utterance": {
+      "slice": "S1",
+      "binary": "when dur_ms > 0: raw little-endian signed 16-bit mono PCM, 16000 Hz",
+      "fields": {
+        "turn": "int",
+        "format": "pcm_s16le",
+        "rate": "int 16000 (send the number; the backend also accepts the string)",
+        "dur_ms": "int (0 = no speech)",
+        "tail_silence_ms": "int"
+      }
+    },
+    "cancel": {
+      "slice": "S1",
+      "fields": {
+        "turn": "int"
+      }
+    },
+    "ping": {
+      "slice": "S1",
+      "fields": {}
+    },
+    "client_event": {
+      "slice": "S1",
+      "fields": {
+        "kind": "str",
+        "...": "free extra fields"
+      }
+    },
+    "wake": {
+      "slice": "S3",
+      "fields": {
+        "followup": "bool, default false"
+      }
+    },
+    "alert_read": {
+      "slice": "S4",
+      "fields": {
+        "key": "str"
+      }
+    },
+    "alert_ack": {
+      "slice": "S4",
+      "fields": {
+        "key": "str"
+      }
+    }
   },
   "server_to_client": {
-    "hello_ok":  { "slice": "S1", "fields": { "version": "str", "ok": "bool" } },
-    "snapshot":  { "slice": "S1", "fields": { "conv": "conv_state", "alerts": "alert_item[] (active alerts only; empty before S4)" } },
-    "state":     { "slice": "S1", "fields": { "conv": "conv_state", "turn": "int|null" } },
-    "tts":       { "slice": "S1", "binary": "one complete WAV file (S1: the whole reply)", "fields": { "turn": "int|null", "alert": "str|null (key, for alert_read)", "seq": "int", "final": "bool", "followup": "bool (S3, default false)" } },
-    "turn_done": { "slice": "S1", "fields": { "turn": "int", "reason": "turn_done_reason", "timeout_kind": "timeout_kind|null", "timings": "{stt_ms, hermes_ms, tts_ms, first_audio_ms, sc1_ms} (numbers or null)" } },
-    "error":     { "slice": "S1", "fields": { "code": "error_code" } },
-    "pong":      { "slice": "S1", "fields": {} }
+    "hello_ok": {
+      "slice": "S1",
+      "fields": {
+        "version": "str",
+        "ok": "bool"
+      }
+    },
+    "snapshot": {
+      "slice": "S1",
+      "fields": {
+        "conv": "conv_state",
+        "alerts": "alert_item[] (active alerts only; empty before S4)"
+      }
+    },
+    "state": {
+      "slice": "S1",
+      "fields": {
+        "conv": "conv_state",
+        "turn": "int|null"
+      }
+    },
+    "tts": {
+      "slice": "S1",
+      "binary": "one complete WAV file (S1: the whole reply)",
+      "fields": {
+        "turn": "int|null",
+        "alert": "str|null (key, for alert_read)",
+        "seq": "int",
+        "final": "bool",
+        "followup": "bool (S3, default false)"
+      }
+    },
+    "turn_done": {
+      "slice": "S1",
+      "fields": {
+        "turn": "int",
+        "reason": "turn_done_reason",
+        "timeout_kind": "timeout_kind|null",
+        "timings": "{stt_ms, hermes_ms, tts_ms, first_audio_ms, sc1_ms} (numbers or null)"
+      }
+    },
+    "error": {
+      "slice": "S1",
+      "fields": {
+        "code": "error_code"
+      }
+    },
+    "pong": {
+      "slice": "S1",
+      "fields": {}
+    }
+  },
+  "http": {
+    "GET /device-config?device=<name>": {
+      "auth": "Authorization: Bearer <DEVICE_TOKEN>, 401 otherwise",
+      "response": "{device, sound, wake, quiet_hours, followup_listen_s, listen_no_speech_s, silence_rms}"
+    },
+    "GET /healthz": "always 200, body {alive, ready, hermes_reachable}",
+    "GET /readyz": "503 until models loaded, then 200"
   }
 }
