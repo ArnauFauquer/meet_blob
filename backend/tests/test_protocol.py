@@ -85,3 +85,14 @@ def test_client_message_parsing() -> None:
     assert isinstance(utt, schemas.Utterance)
     event = schemas.client_message.validate_json('{"type":"client_event","kind":"x","ms":5}')
     assert event.model_dump() == {"type": "client_event", "kind": "x", "ms": 5}
+
+
+@pytest.mark.parametrize(("rate", "ok"), [("16000", True), ('"16000"', True), ("48000", False)])
+def test_utterance_rate_number_or_string(rate: str, ok: bool) -> None:
+    head = '{"type":"utterance","turn":1,"format":"pcm_s16le","dur_ms":0,"tail_silence_ms":0,'
+    raw = f'{head}"rate":{rate}}}'
+    if ok:
+        assert schemas.client_message.validate_json(raw).rate == 16000  # type: ignore[union-attr]
+    else:
+        with pytest.raises(ValueError):
+            schemas.client_message.validate_json(raw)

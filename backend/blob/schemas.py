@@ -7,7 +7,7 @@ client messages to ClientMessage and their handlers to the hub dispatch table.
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, TypeAdapter
 
 
 class ConvState(StrEnum):
@@ -57,7 +57,8 @@ class Utterance(BaseModel):
     type: Literal["utterance"] = "utterance"
     turn: int
     format: Literal["pcm_s16le"]
-    rate: Literal[16000]
+    # messages.json writes the value as "16000"; accept the string form too.
+    rate: Annotated[Literal[16000], BeforeValidator(lambda v: 16000 if v == "16000" else v)]
     dur_ms: int = Field(ge=0)
     tail_silence_ms: int = Field(ge=0)
 
