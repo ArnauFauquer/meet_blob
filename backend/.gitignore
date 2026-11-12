@@ -1,0 +1,2 @@
+# local model cache (MODEL_DIR=.models for development)
+.models/

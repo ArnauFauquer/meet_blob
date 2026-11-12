@@ -54,6 +54,7 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = ["gpu: loads the real speech models (skipped in CI; runs on CPU or GPU)"]
 
 [tool.coverage.run]
