@@ -189,8 +189,9 @@ const vec3 LOW_V = cross(LOW_A, LOW_U);
 
 // Dark studio in HDR (values above 1 are lights). Gels tint every light with
 // the state colour; the key keeps some white so highlights read as metal.
-// Chrome reads through contrast: a bright sky over a dark floor, split by a
-// sharp horizon, with tall strips at the sides and a gel rim light behind.
+// Chrome reads through contrast: a bright sky over a dark floor, with tall
+// strips at the sides and a gel rim light behind. The horizon is a wide
+// gradient: a sharp one mirrors as a thin line that cuts the blob in two.
 vec3 env(vec3 d) {
   vec3 gel = uColor;
   vec3 key = mix(vec3(1.0), gel, 0.55);
@@ -200,7 +201,7 @@ vec3 env(vec3 d) {
   // Sky: broad and bright, in the gel colour, whiter towards the zenith.
   float zen = smoothstep(0.15, 1.0, d.y);
   vec3 sky = gel * (0.04 + 0.9 * zen) + key * 0.35 * zen * zen * zen;
-  sky += cool * (0.22 * exp(-max(hy, 0.0) * 10.0) + 0.08 * exp(-max(hy, 0.0) * 3.0)); // glow band along the horizon
+  sky += cool * 0.14 * exp(-max(hy, 0.0) * 3.0); // wide glow above the horizon
   // Black cards in the sky break it into bands, as in product shots of chrome.
   float cards = softbox(d, CARD1_A, CARD1_U, CARD1_V, vec2(0.13, 0.9), 0.12);
   cards = max(cards, softbox(d, CARD2_A, CARD2_U, CARD2_V, vec2(0.2, 0.9), 0.15));
@@ -208,7 +209,7 @@ vec3 env(vec3 d) {
   // Floor: dark under the horizon, then a pool of gel light bouncing up, so
   // the lower half of the blob still shows its volume.
   vec3 floorC = gel * (0.008 + 0.13 * smoothstep(-0.3, -0.95, d.y)) + 0.001;
-  vec3 c = mix(floorC, sky, smoothstep(-0.12, 0.06, hy));
+  vec3 c = mix(floorC, sky, smoothstep(-0.35, 0.3, hy));
   // Lights: a soft overhead key, a wide strip on the right, a gel strip behind.
   c += key * 2.2 * softbox(d, KEY_A, KEY_U, KEY_V, vec2(0.85, 0.4), 0.35);
   c += cool * 2.0 * softbox(d, STRIP_A, STRIP_U, STRIP_V, vec2(0.3, 0.9), 0.2);
@@ -331,16 +332,24 @@ void main() {
     float tEnd = b + sqrt(h);
     bool hit = false;
     float d = 1.0;
+    float near = 1e3; // closest pass of the ray, as distance over ray length
+    float tNear = t;
     for (int i = 0; i < MARCH_STEPS; i++) {
       d = map(ro + rd * t);
       if (d < 0.0013 * t) { hit = true; break; }
+      if (d < near * t) { near = d / t; tNear = t; }
       t += d * mix(0.86, 0.6, uLevel); // the level swells break the distance bound a little
       if (t > tEnd) break;
     }
     // A ray grazing a swell can run out of steps just above the surface;
     // counting it as a miss leaves a dark seam inside the silhouette.
     hit = hit || (d < 0.01 && t < tEnd);
-    if (hit) {
+    // Antialiased silhouette: a ray that only grazes the blob is shaded at its
+    // closest point and blended over the background by how near it passed.
+    float px = 0.83 / uRes.y; // one pixel, per unit of ray length
+    float cov = hit ? 1.0 : 1.0 - smoothstep(0.0013, 0.0013 + 2.0 * px, near);
+    if (cov > 0.0) {
+      if (!hit) t = tNear;
       vec3 p = ro + rd * t;
       vec3 n = normalAt(p);
       float ndv = clamp(dot(n, -rd), 0.0, 1.0);
@@ -364,12 +373,18 @@ void main() {
 #if QUALITY >= 2
       heat += 0.85 * lavaHeat(lavaDist(p + rd * r * 0.85, r, 0.6), r); // same lobes, pulled inwards
 #endif
-      // The face is lava too: a soft halo with a hot core, on the front only.
+      // The face, on the front only: a lava halo under the skin, then a near
+      // white core drawn over the mirror, which goes dark around it. Light on
+      // dark, so no reflection or lobe behind can hide the eyes.
+      float face = 0.0;
       if (uMouth.z > 0.001) {
         vec2 fq = faceSpace(p, uShapeA);
         if (uMix > 0.001) fq = mix(fq, faceSpace(p, uShapeB), uMix);
         float fd = faceDist(fq);
-        heat += uMouth.z * smoothstep(0.0, 0.5, n.z) * exp(-max(fd, 0.0) / 0.04) * (0.4 + 1.2 * smoothstep(0.0, -0.03, fd));
+        float front = uMouth.z * smoothstep(0.0, 0.5, n.z);
+        heat += front * 0.4 * exp(-max(fd, 0.0) / 0.04);
+        spec *= 1.0 - 0.75 * min(front, 1.0) * exp(-max(fd, 0.0) / 0.09);
+        face = min(front, 1.0) * smoothstep(0.012, -0.012, fd);
       }
       float blob = min(heat, 1.0);
       vec3 hotLava = mix(uLava, vec3(1.0), 0.2 * smoothstep(0.8, 1.6, heat)); // whiter in the core
@@ -379,7 +394,9 @@ void main() {
       // Thin rim lit from behind: the shell is slightly translucent there.
       float rim = pow(1.0 - ndv, 3.0);
       // Where lava presses on the skin the mirror thins and the glow comes through.
-      col = spec * (1.0 - 0.15 * blob) + inner * (1.0 - 0.8 * F * (1.0 - 0.5 * blob)) + uColor * uGlow * 0.12 * rim;
+      vec3 lit = spec * (1.0 - 0.15 * blob) + inner * (1.0 - 0.8 * F * (1.0 - 0.5 * blob)) + uColor * uGlow * 0.12 * rim;
+      lit = mix(lit, mix(uLava, vec3(1.0), 0.7) * 1.1, face);
+      col = mix(col, lit, cov);
     }
   }
 
