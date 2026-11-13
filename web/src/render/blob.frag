@@ -85,7 +85,7 @@ float sphereShape(vec3 p) {
   // Slow ripples: three crossed sines, much cheaper than value noise.
   vec3 w = p * vec3(2.1, 2.6, 2.3) + vec3(uFlow * 0.7, -uFlow * 0.9, uFlow * 0.5);
   d += sin(w.x + 0.8 * w.y) * sin(w.y - 0.6 * w.z) * sin(w.z + 0.7 * w.x) * uAmp * 0.35;
-  if (uLevel > 0.002) d += (noise(p * 2.4 + vec3(0.0, uFlow * 1.3, uFlow * 0.9)) - 0.5) * uLevel * 0.17;
+  if (uLevel > 0.002) d += (noise(p * 1.9 + vec3(0.0, uFlow * 1.3, uFlow * 0.9)) - 0.5) * uLevel * 0.17;
   return d;
 }
 

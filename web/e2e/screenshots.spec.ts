@@ -9,6 +9,11 @@ import { dbg, openBlob, tap, waitView } from './helpers';
 const OUT = fileURLToPath(new URL('../../docs/screenshots/', import.meta.url));
 const ICONS = fileURLToPath(new URL('../public/icons/', import.meta.url));
 
+// Software GL is slow enough that the page would step its quality down;
+// the screenshots show the default (full) quality.
+const fullQuality = (page: Page) =>
+  page.evaluate(() => (window as unknown as { blobDebug: { setQuality(q: number): void } }).blobDebug.setQuality(2));
+
 async function shot(page: Page, view: string, name: string, settleMs: number) {
   await waitView(page, view);
   await page.waitForTimeout(settleMs); // let the colour crossfade finish
@@ -24,6 +29,8 @@ for (const [w, h] of [
     test.setTimeout(180_000);
     await page.setViewportSize({ width: w, height: h });
     await openBlob(page, 'slow'); // 5 s of thinking
+    await waitView(page, 'idle');
+    await fullQuality(page); // before the page measures itself slow: no shader rebuild later
     await shot(page, 'idle', `idle-${w}x${h}`, 3000);
     await tap(page);
     await shot(page, 'listening', `listening-${w}x${h}`, 2500);
@@ -34,6 +41,7 @@ for (const [w, h] of [
     await page.goto('about:blank'); // a hash-only change would not reload the page
     await openBlob(page, 'hermes_fail');
     await waitView(page, 'idle');
+    await fullQuality(page);
     await tap(page);
     await waitView(page, 'listening');
     await page.waitForTimeout(800);
@@ -47,6 +55,7 @@ test('PWA icons from the idle blob', async ({ page }) => {
   await page.setViewportSize({ width: 512, height: 512 });
   await openBlob(page, 'e2e-icon');
   await waitView(page, 'idle');
+  await fullQuality(page);
   await page.waitForTimeout(3000);
   const src = `${OUT}../../web/node_modules/.cache/blob-e2e/icon-src.png`;
   await page.screenshot({ path: src });
