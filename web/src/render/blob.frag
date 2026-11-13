@@ -35,6 +35,10 @@ uniform float uRadius;
 uniform float uShapeA;
 uniform float uShapeB;
 uniform float uMix;
+// Lava face (Look in tables.ts), in units of the blob radius, y up.
+uniform vec4 uEyes;   // eye half width, half height (blink applied), height, happy (0 open, 1 arcs)
+uniform vec2 uGaze;   // where the face looks
+uniform vec3 uMouth;  // curvature (+ smile), opening, face strength
 
 out vec4 fragColor;
 
@@ -102,13 +106,19 @@ float sdRoundBox(vec3 p, vec3 b, float r) {
   return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
 }
 
-// Both alert shapes at once: (triangle, square). They share the transform and the shimmer.
-vec2 alertShapes(vec3 p) {
-  float s = radius() / uRadius;
-  p /= s;
+// Alert frame: undo the breathing scale and turn with the slow sway.
+vec3 alertFrame(vec3 p) {
+  p /= radius() / uRadius;
   float a = 0.35 * sin(uFlow * 0.6);
   p.xz = mat2(cos(a), -sin(a), sin(a), cos(a)) * p.xz;
   p.yz = mat2(0.98, -0.2, 0.2, 0.98) * p.yz;
+  return p;
+}
+
+// Both alert shapes at once: (triangle, square). They share the transform and the shimmer.
+vec2 alertShapes(vec3 p) {
+  float s = radius() / uRadius;
+  p = alertFrame(p);
   vec2 d = vec2(sdTriPrism(p + vec3(0.0, 0.15, 0.0), vec2(0.6, 0.2)) - 0.12,
                 sdRoundBox(p, vec3(0.6, 0.6, 0.32), 0.14));
   d += (noise(p * 2.0 + vec3(0.0, uFlow * 0.6, 0.0)) - 0.5) * 0.03; // liquid shimmer
@@ -252,6 +262,46 @@ float lavaDist(vec3 q, float r, float pull) {
   return d;
 }
 
+// Face plane for shape id: the sphere's face sits on its front in screen
+// space; on an alert shape it turns with the sway, lower and smaller on the
+// triangle so it fits inside.
+vec2 faceSpace(vec3 p, float id) {
+  if (id < 0.5) return p.xy / radius();
+  vec2 f = alertFrame(p).xy / uRadius;
+  return id < 1.5 ? (f + vec2(0.0, 0.3)) / 0.62 : f / 0.95;
+}
+
+// Approximate ellipse distance (exact on the axes), good enough for a glow.
+float sdEllipse(vec2 q, vec2 ab) {
+  float k0 = length(q / ab);
+  float k1 = length(q / (ab * ab));
+  return k0 * (k0 - 1.0) / k1;
+}
+
+// An arc of radius ra and thickness rb, centred on +y, half aperture given by sc = (sin, cos).
+float sdArc(vec2 q, vec2 sc, float ra, float rb) {
+  q.x = abs(q.x);
+  return ((sc.y * q.x > sc.x * q.y) ? length(q - sc * ra) : abs(length(q) - ra)) - rb;
+}
+
+// Distance to the face strokes: two eyes (ellipses blending into happy arcs)
+// and a mouth (a curve that opens into an ellipse).
+float faceDist(vec2 q) {
+  float d = 1e3;
+  for (int i = 0; i < 2; i++) {
+    vec2 e = q - vec2(i == 0 ? -0.3 : 0.3, uEyes.z) - uGaze;
+    float eye = sdEllipse(e, uEyes.xy);
+    float arc = sdArc(e + vec2(0.0, 0.07), vec2(0.8, 0.6), 0.14, 0.035);
+    d = min(d, mix(eye, arc, uEyes.w));
+  }
+  vec2 m = q - vec2(0.0, -0.35) - uGaze * 0.5;
+  float xc = clamp(m.x, -0.2, 0.2);
+  float k = uMouth.x;
+  d = min(d, length(vec2(m.x - xc, (m.y - k * xc * xc) / sqrt(1.0 + 4.0 * k * k * xc * xc))) - 0.035);
+  if (uMouth.y > 0.003) d = min(d, sdEllipse(m, vec2(0.08 + uMouth.y * 0.7, uMouth.y)));
+  return d;
+}
+
 // Glow of one lava sample: a soft halo outside the shape, then brighter
 // towards the core, so a slice through a lobe is never a flat disc.
 float lavaHeat(float ld, float r) {
@@ -314,6 +364,13 @@ void main() {
 #if QUALITY >= 2
       heat += 0.85 * lavaHeat(lavaDist(p + rd * r * 0.85, r, 0.6), r); // same lobes, pulled inwards
 #endif
+      // The face is lava too: a soft halo with a hot core, on the front only.
+      if (uMouth.z > 0.001) {
+        vec2 fq = faceSpace(p, uShapeA);
+        if (uMix > 0.001) fq = mix(fq, faceSpace(p, uShapeB), uMix);
+        float fd = faceDist(fq);
+        heat += uMouth.z * smoothstep(0.0, 0.5, n.z) * exp(-max(fd, 0.0) / 0.04) * (0.4 + 1.2 * smoothstep(0.0, -0.03, fd));
+      }
       float blob = min(heat, 1.0);
       vec3 hotLava = mix(uLava, vec3(1.0), 0.2 * smoothstep(0.8, 1.6, heat)); // whiter in the core
       // Glow compressed per state, so the brightest state never turns flat white.

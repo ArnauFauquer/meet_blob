@@ -7,6 +7,7 @@ import {
   Scene,
   Vector2,
   Vector3,
+  Vector4,
   WebGLRenderer,
 } from 'three';
 import fragmentShader from './blob.frag?raw';
@@ -25,6 +26,12 @@ const EASE_S = 0.6; // time constant of the state crossfade
 export const MAX_QUALITY = 2;
 const SLOW_MS = 50; // under 20 fps
 const SLOW_FOR_S = 4;
+const BLINK_S = 0.16; // one blink, closed at the middle
+const FACE_KEYS = ['eyeW', 'eyeH', 'eyeY', 'gazeX', 'gazeY', 'happy', 'smile', 'mouth', 'talk', 'face'] as const;
+
+// Open time before blink n: 3 to 6 s from a fixed sequence, so frozen film
+// strips stay reproducible.
+const blinkGap = (n: number) => 3 + 3 * (Math.sin(n * 12.9898) * 0.5 + 0.5);
 
 export interface FrameInput {
   view: View;
@@ -55,6 +62,8 @@ export class BlobRenderer {
   private lastDraw = 0;
   private level = 0;
   private flashT = 0;
+  private blinkT = 0; // time since the last blink ended
+  private blinkN = 1;
   private raf = 0;
   quality = MAX_QUALITY;
   autoQuality = true;
@@ -93,6 +102,9 @@ export class BlobRenderer {
         uShapeB: { value: first.shape },
         uMix: { value: 0 },
         uLobes: { value: new Float32Array(LOBE_COUNT * 4) },
+        uEyes: { value: new Vector4() },
+        uGaze: { value: new Vector2() },
+        uMouth: { value: new Vector3() },
       },
     });
     this.scene.add(new Mesh(new PlaneGeometry(2, 2), this.material));
@@ -157,6 +169,8 @@ export class BlobRenderer {
     u.uPhase.value = 0;
     this.level = 0;
     this.flashT = 0;
+    this.blinkT = 0;
+    this.blinkN = 1;
   }
 
   // Advances the frozen clock by `dtS` with the given input; draws when asked.
@@ -202,7 +216,7 @@ export class BlobRenderer {
       c.color[i] += (target.color[i] - c.color[i]) * k;
       c.lava[i] += (target.lava[i] - c.lava[i]) * k;
     }
-    for (const key of ['speed', 'amp', 'breath', 'breathHz', 'levelGain', 'glow', 'bright'] as const) {
+    for (const key of ['speed', 'amp', 'breath', 'breathHz', 'levelGain', 'glow', 'bright', ...FACE_KEYS] as const) {
       c[key] += (target[key] - c[key]) * k;
     }
     // Fast attack, slower release, so the surface follows syllables but settles softly.
@@ -210,6 +224,13 @@ export class BlobRenderer {
     this.level += (want - this.level) * (1 - Math.exp(-dt / (want > this.level ? 0.05 : 0.25)));
     this.maxLevel = Math.max(this.maxLevel, this.level);
     this.flashT = Math.max(0, this.flashT - dt / 0.4);
+    this.blinkT += dt;
+    const gap = blinkGap(this.blinkN);
+    if (this.blinkT > gap + BLINK_S) {
+      this.blinkT -= gap + BLINK_S;
+      this.blinkN++;
+    }
+    const open = this.blinkT < gap ? 1 : Math.abs((this.blinkT - gap) / BLINK_S - 0.5) * 2;
 
     const u = this.material.uniforms;
     u.uFlow.value += dt * c.speed;
@@ -225,6 +246,9 @@ export class BlobRenderer {
     u.uShapeA.value = this.morph.a;
     u.uShapeB.value = this.morph.b;
     u.uMix.value = morphMix(this.morph);
+    (u.uEyes.value as Vector4).set(c.eyeW, Math.max(0.012, c.eyeH * open), c.eyeY, c.happy);
+    (u.uGaze.value as Vector2).set(c.gazeX, c.gazeY);
+    (u.uMouth.value as Vector3).set(c.smile, c.mouth + c.talk * this.level, c.face);
     lobes(u.uFlow.value as number, c.amp, u.uLobes.value as Float32Array);
   }
 }

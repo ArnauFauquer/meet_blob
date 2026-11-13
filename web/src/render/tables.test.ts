@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALERT_COLOR, SHAPE, alertLook, alertShape } from './tables';
+import { ALERT_COLOR, SHAPE, STATE_LOOK, alertLook, alertShape } from './tables';
 
 describe('alert table', () => {
   it('timer is a triangle, every other source a square', () => {
@@ -19,5 +19,20 @@ describe('alert table', () => {
   it('returns a copy, so the renderer can ease it in place', () => {
     alertLook('info').color[0] = 9;
     expect(ALERT_COLOR.info[0]).not.toBe(9);
+  });
+});
+
+describe('lava face', () => {
+  it('only speaking smiles with happy eyes and moves the mouth with the level', () => {
+    for (const [row, look] of Object.entries(STATE_LOOK)) {
+      expect(look.happy > 0, row).toBe(row === 'speaking');
+      expect(look.talk > 0, row).toBe(row === 'speaking');
+    }
+  });
+  it('error frowns with closed eyes; alerts keep a face', () => {
+    expect(STATE_LOOK.error.smile).toBeLessThan(0);
+    expect(STATE_LOOK.error.eyeH).toBeLessThan(STATE_LOOK.idle.eyeH / 4);
+    expect(alertLook('info').face).toBeGreaterThan(0);
+    expect(alertLook('urgent').mouth).toBeGreaterThan(0);
   });
 });
