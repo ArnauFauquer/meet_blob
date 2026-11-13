@@ -61,8 +61,10 @@ local repository with all refs.
 ## Visibility
 
 - Repository: public (`gh repo edit ... --visibility public`).
-- Package `ghcr.io/arnaufauquer/meet_blob`: see the session's final message. The `gh` token has no
-  `read:packages`/`write:packages`, and GitHub has no API to change a package's visibility. Manual step:
+- Package `ghcr.io/arnaufauquer/meet_blob`: still **private** when this was written (an anonymous token
+  request to ghcr.io answers 401). Making the repository public does not change an existing package, the
+  `gh` token has no `read:packages`/`write:packages`, and GitHub has no API to change a package's
+  visibility. Until the owner does the manual step below, the cluster still needs the pull secret. Manual step:
   https://github.com/users/ArnauFauquer/packages/container/meet_blob/settings, "Danger Zone", "Change
   visibility", "Public".
 
