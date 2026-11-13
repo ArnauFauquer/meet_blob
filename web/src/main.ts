@@ -226,6 +226,9 @@ window.blobDebug = {
     renderer.autoQuality = false;
     renderer.setQuality(q);
   },
+  setDim(v: number) {
+    if (renderer) renderer.dim = Math.max(0, Math.min(1, v));
+  },
   freeze(v: View) {
     renderer?.freeze(v);
   },

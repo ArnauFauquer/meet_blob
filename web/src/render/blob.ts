@@ -48,6 +48,7 @@ export class BlobRenderer {
   private flashT = 0;
   private raf = 0;
   quality = MAX_QUALITY;
+  dim = 1; // night dimming, 0..1, multiplies every state's brightness (uBright)
   autoQuality = true;
   private avgMs = 0;
   private slowS = 0;
@@ -203,7 +204,7 @@ export class BlobRenderer {
     u.uBreath.value = c.breath;
     u.uLevel.value = this.level;
     u.uGlow.value = c.glow;
-    u.uBright.value = c.bright;
+    u.uBright.value = c.bright * this.dim;
     u.uFlash.value = this.flashT;
     lobes(u.uFlow.value as number, c.amp, u.uLobes.value as Float32Array);
   }

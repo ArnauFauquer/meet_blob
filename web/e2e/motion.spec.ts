@@ -25,12 +25,13 @@ export function speechLevel(t: number): number {
   return Math.max(0, Math.min(1, 0.85 * edge * syl * stress));
 }
 
-async function sheet(page: Page, view: string, speech: boolean): Promise<void> {
+async function sheet(page: Page, view: string, speech: boolean, name = view, dim = 1): Promise<void> {
   const png = await page.evaluate(
-    async ({ view, speech, frames, every, step, levelSrc }) => {
+    async ({ view, speech, frames, every, step, levelSrc, dim }) => {
       const level = new Function(`return (${levelSrc})`)() as (t: number) => number;
       const d = (window as unknown as { blobDebug: Record<string, (...a: unknown[]) => void> }).blobDebug;
       const canvas = document.getElementById('blob') as HTMLCanvasElement;
+      d.setDim(dim);
       d.freeze(view);
       const side = Math.round(canvas.height * 0.92);
       const tile = 260;
@@ -53,13 +54,13 @@ async function sheet(page: Page, view: string, speech: boolean): Promise<void> {
         const y = Math.floor(f / cols) * tile;
         g.drawImage(canvas, (canvas.width - side) / 2, (canvas.height - side) / 2, side, side, x, y, tile, tile);
         g.fillStyle = 'rgba(255,255,255,0.55)';
-        g.fillText(`${view} t=${t.toFixed(1)}s${speech ? ` lvl=${level(t).toFixed(2)}` : ''}`, x + 6, y + 16);
+        g.fillText(`${view} t=${t.toFixed(1)}s${speech ? ` lvl=${level(t).toFixed(2)}` : ''}${dim < 1 ? ` dim=${dim}` : ''}`, x + 6, y + 16);
       }
       return out.toDataURL('image/png');
     },
-    { view, speech, frames: FRAMES, every: EVERY, step: STEP_S, levelSrc: speechLevel.toString() },
+    { view, speech, frames: FRAMES, every: EVERY, step: STEP_S, levelSrc: speechLevel.toString(), dim },
   );
-  writeFileSync(`${OUT}${view}.png`, Buffer.from(png.split(',')[1], 'base64'));
+  writeFileSync(`${OUT}${name}.png`, Buffer.from(png.split(',')[1], 'base64'));
 }
 
 // Milliseconds per drawn frame, synchronised with a 1-pixel readback. The
@@ -98,6 +99,8 @@ test('motion contact sheets', async ({ page }) => {
   await sheet(page, 'listening', true);
   await sheet(page, 'speaking', true);
   await sheet(page, 'thinking', false);
+  await sheet(page, 'error', false);
+  await sheet(page, 'idle', false, 'idle-night-dim0.35', 0.35); // night dimming hook
   expect(await page.evaluate(() => (window as unknown as { blobDebug: { quality: number } }).blobDebug.quality)).toBe(2);
 });
 

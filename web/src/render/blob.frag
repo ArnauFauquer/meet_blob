@@ -84,7 +84,7 @@ float sphereShape(vec3 p) {
 #endif
   // Slow ripples: three crossed sines, much cheaper than value noise.
   vec3 w = p * vec3(2.1, 2.6, 2.3) + vec3(uFlow * 0.7, -uFlow * 0.9, uFlow * 0.5);
-  d += sin(w.x + sin(w.y)) * sin(w.y * 0.9 + sin(w.z)) * sin(w.z * 1.1 + 1.3) * uAmp * 0.35;
+  d += sin(w.x + 0.8 * w.y) * sin(w.y - 0.6 * w.z) * sin(w.z + 0.7 * w.x) * uAmp * 0.35;
   if (uLevel > 0.002) d += (noise(p * 2.4 + vec3(0.0, uFlow * 1.3, uFlow * 0.9)) - 0.5) * uLevel * 0.17;
   return d;
 }
@@ -106,18 +106,37 @@ vec3 normalAt(vec3 p) {
                    k.yxy * map(p + k.yxy * e) + k.xxx * map(p + k.xxx * e));
 }
 
-// Soft rectangular light seen in direction d: centre direction a, half sizes
-// (in tangent units) and edge softness. Gnomonic projection on a's plane.
-float softbox(vec3 d, vec3 a, vec3 up, vec2 size, float soft) {
+// Soft rectangular light seen in direction d: centre direction a, tangent
+// axes u and v, half sizes (in tangent units) and edge softness. Gnomonic
+// projection on a's plane.
+float softbox(vec3 d, vec3 a, vec3 u, vec3 v, vec2 size, float soft) {
   float c = dot(d, a);
   if (c <= 0.05) return 0.0;
   vec3 q = d / c - a;
-  vec3 u = normalize(cross(up, a));
-  vec3 v = cross(a, u);
   vec2 e = abs(vec2(dot(q, u), dot(q, v))) - size;
   float sd = length(max(e, 0.0)) + min(max(e.x, e.y), 0.0);
   return 1.0 - smoothstep(-soft, soft, sd);
 }
+
+// Light frames, folded at compile time: centre direction, then tangent axes.
+const vec3 CARD1_A = normalize(vec3(0.55, 0.45, 0.45));
+const vec3 CARD1_U = normalize(cross(vec3(0.0, 1.0, 0.0), CARD1_A));
+const vec3 CARD1_V = cross(CARD1_A, CARD1_U);
+const vec3 CARD2_A = normalize(vec3(-0.6, 0.4, -0.35));
+const vec3 CARD2_U = normalize(cross(vec3(0.0, 1.0, 0.0), CARD2_A));
+const vec3 CARD2_V = cross(CARD2_A, CARD2_U);
+const vec3 KEY_A = normalize(vec3(-0.2, 0.9, 0.35));
+const vec3 KEY_U = normalize(cross(vec3(0.0, 0.0, -1.0), KEY_A));
+const vec3 KEY_V = cross(KEY_A, KEY_U);
+const vec3 STRIP_A = normalize(vec3(0.9, 0.05, 0.2));
+const vec3 STRIP_U = normalize(cross(vec3(0.0, 1.0, 0.0), STRIP_A));
+const vec3 STRIP_V = cross(STRIP_A, STRIP_U);
+const vec3 RIM_A = normalize(vec3(-0.85, -0.2, -0.5));
+const vec3 RIM_U = normalize(cross(vec3(0.0, 1.0, 0.0), RIM_A));
+const vec3 RIM_V = cross(RIM_A, RIM_U);
+const vec3 FILL_A = normalize(vec3(0.38, 0.12, 1.0));
+const vec3 FILL_U = normalize(cross(vec3(0.0, 1.0, 0.0), FILL_A));
+const vec3 FILL_V = cross(FILL_A, FILL_U);
 
 // Dark studio in HDR (values above 1 are lights). Gels tint every light with
 // the state colour; the key keeps some white so highlights read as metal.
@@ -134,24 +153,26 @@ vec3 env(vec3 d) {
   vec3 sky = gel * (0.04 + 0.9 * zen) + key * 0.35 * zen * zen * zen;
   sky += cool * (0.22 * exp(-max(hy, 0.0) * 10.0) + 0.08 * exp(-max(hy, 0.0) * 3.0)); // glow band along the horizon
   // Black cards in the sky break it into bands, as in product shots of chrome.
-  float cards = softbox(d, normalize(vec3(0.55, 0.45, 0.45)), vec3(0.0, 1.0, 0.0), vec2(0.13, 0.9), 0.08);
-  cards = max(cards, softbox(d, normalize(vec3(-0.6, 0.4, -0.35)), vec3(0.0, 1.0, 0.0), vec2(0.2, 0.9), 0.1));
+  float cards = softbox(d, CARD1_A, CARD1_U, CARD1_V, vec2(0.13, 0.9), 0.08);
+  cards = max(cards, softbox(d, CARD2_A, CARD2_U, CARD2_V, vec2(0.2, 0.9), 0.1));
   sky *= 1.0 - 0.92 * cards;
   // Floor: near black, a dim pool of gel light further down.
   vec3 floorC = gel * (0.006 + 0.08 * smoothstep(-0.5, -1.0, d.y)) + 0.0008;
   vec3 c = mix(floorC, sky, smoothstep(-0.03, 0.02, hy));
   // Lights: a soft overhead key, a wide strip on the right, a gel strip behind.
-  c += key * 2.2 * softbox(d, normalize(vec3(-0.2, 0.9, 0.35)), vec3(0.0, 0.0, -1.0), vec2(0.85, 0.4), 0.25);
-  c += cool * 2.0 * softbox(d, normalize(vec3(0.9, 0.05, 0.2)), vec3(0.0, 1.0, 0.0), vec2(0.3, 0.9), 0.1);
-  c += gel * 2.5 * softbox(d, normalize(vec3(-0.85, -0.2, -0.5)), vec3(0.0, 1.0, 0.0), vec2(0.18, 0.6), 0.12);
+  c += key * 2.2 * softbox(d, KEY_A, KEY_U, KEY_V, vec2(0.85, 0.4), 0.25);
+  c += cool * 2.0 * softbox(d, STRIP_A, STRIP_U, STRIP_V, vec2(0.3, 0.9), 0.1);
+  c += gel * 2.5 * softbox(d, RIM_A, RIM_U, RIM_V, vec2(0.18, 0.6), 0.12);
   // A broad diffusion panel behind the camera fills the centre of the blob, so
   // it reads as a mirror and never as a see-through lens.
   vec3 fill = mix(gel, key, 0.3) * 0.9;
   // One panel, off centre: a pair would read as eyes.
-  c += fill * softbox(d, normalize(vec3(0.38, 0.12, 1.0)), vec3(0.0, 1.0, 0.0), vec2(0.34, 0.42), 0.22);
+  c += fill * softbox(d, FILL_A, FILL_U, FILL_V, vec2(0.34, 0.42), 0.22);
+#if QUALITY >= 1
   // Small hard lights: fine glints on the ripples.
   c += vec3(8.0) * pow(max(dot(d, normalize(vec3(0.5, 0.6, 0.62))), 0.0), 1600.0);
   c += key * 5.0 * pow(max(dot(d, normalize(vec3(-0.6, 0.35, 0.72))), 0.0), 1000.0);
+#endif
   return c;
 }
 
@@ -207,8 +228,8 @@ void main() {
     float d = 1.0;
     for (int i = 0; i < MARCH_STEPS; i++) {
       d = map(ro + rd * t);
-      if (d < 0.0008 * t) { hit = true; break; }
-      t += d * mix(0.8, 0.6, uLevel); // the level swells break the distance bound a little
+      if (d < 0.0013 * t) { hit = true; break; }
+      t += d * mix(0.86, 0.6, uLevel); // the level swells break the distance bound a little
       if (t > tEnd) break;
     }
     // A ray grazing a swell can run out of steps just above the surface;
@@ -234,7 +255,7 @@ void main() {
       // Just under the skin (lobes that push the surface glow through it) and,
       // deeper along the ray, dimmer lava further inside.
       float ld = lavaDist(p - n * r * 0.22, r, 1.0);
-#if QUALITY >= 1
+#if QUALITY >= 2
       ld = min(ld, lavaDist(p + rd * r * 0.85, r, 0.6) + 0.03 * r); // same lobes, pulled inwards
 #endif
       // Volumetric look: a soft skin, then brighter the deeper inside the lava.
