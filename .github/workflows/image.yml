@@ -1,6 +1,8 @@
 # Builds the Blob image (Dockerfile at the repo root) and pushes it to ghcr.io.
 # Tags: sha-<7-char commit> (immutable, pinned by the home_lab chart) and latest.
-# Tests run in ci.yml; this workflow only builds and publishes.
+# Only main pushes (and manual runs) get here; ci.yml runs first so no image is
+# pushed from a red commit. Only the build job holds packages: write.
+# amd64 only: the image is CUDA-based and runs on kube1.
 name: image
 
 on:
@@ -12,11 +14,11 @@ on:
       - Dockerfile
       - .dockerignore
       - .github/workflows/image.yml
+      - .github/workflows/ci.yml
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: image-${{ github.ref }}
@@ -27,28 +29,40 @@ env:
   IMAGE: ghcr.io/arnaufauquer/meet_blob
 
 jobs:
+  tests:
+    uses: ./.github/workflows/ci.yml
+
   build:
-    runs-on: ubuntu-latest
+    needs: tests
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Also writes the OCI labels (source, revision, created...) that link the package to this repo.
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.IMAGE }}
           tags: |
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           push: true
