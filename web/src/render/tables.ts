@@ -1,7 +1,10 @@
+import type { AlertItem } from '../protocol';
 import type { View } from '../state';
 
-// Conversation state to colour and motion (design, Display rules).
-// S4 adds a second table: alert source and urgency to shape, colour and pulse.
+type Urgency = AlertItem['urgency'];
+
+// Conversation state to colour and motion (design, Display rules), and the
+// alert table: source and urgency to shape, colour and pulse speed.
 export interface Look {
   color: [number, number, number]; // linear RGB, also tints the environment
   speed: number; // flow speed of the slow organic motion
@@ -23,6 +26,32 @@ export const STATE_LOOK: Record<LookRow, Look> = {
   error: { color: [0.42, 0.42, 0.45], speed: 0.1, amp: 0.06, breath: 0.02, breathHz: 0.12, levelGain: 0.5, glow: 0.3, bright: 0.45 },
 };
 
-export function lookFor(view: View): Look {
+export function lookFor(view: Exclude<View, 'alert'>): Look {
   return STATE_LOOK[view === 'offline' ? 'error' : view];
+}
+
+// Shape ids understood by shape() in blob.frag.
+export const SHAPE = { sphere: 0, triangle: 1, square: 2 } as const;
+export type ShapeId = (typeof SHAPE)[keyof typeof SHAPE];
+
+// Alert source to shape. Slice 4: timer is a triangle, every other source a square.
+export const SOURCE_SHAPE: Record<string, ShapeId> = { timer: SHAPE.triangle };
+export const DEFAULT_ALERT_SHAPE: ShapeId = SHAPE.square;
+
+export const ALERT_COLOR: Record<Urgency, [number, number, number]> = {
+  info: [0.1, 0.85, 0.28], // green
+  urgent: [1.0, 0.07, 0.05], // red
+};
+export const INFO_PULSE_HZ = 0.45;
+export const URGENT_PULSE_FACTOR = 2; // urgent pulses at twice the rate of info
+
+const ALERT_MOTION = { speed: 0.25, amp: 0.05, breath: 0.07, levelGain: 0.6, glow: 1.1, bright: 1.05 };
+
+export function alertShape(source: string): ShapeId {
+  return SOURCE_SHAPE[source] ?? DEFAULT_ALERT_SHAPE;
+}
+
+export function alertLook(urgency: Urgency): Look {
+  const breathHz = urgency === 'urgent' ? INFO_PULSE_HZ * URGENT_PULSE_FACTOR : INFO_PULSE_HZ;
+  return { ...ALERT_MOTION, color: [...ALERT_COLOR[urgency]], breathHz };
 }
