@@ -106,15 +106,17 @@ vec3 normalAt(vec3 p) {
                    k.yxy * map(p + k.yxy * e) + k.xxx * map(p + k.xxx * e));
 }
 
-// Soft rectangular light seen in direction d: centre direction a, tangent
-// axes u and v, half sizes (in tangent units) and edge softness. Gnomonic
-// projection on a's plane.
+// Soft light seen in direction d: centre direction a, tangent axes u and v,
+// half sizes (in tangent units) and edge softness. Gnomonic projection on
+// a's plane. Fully rounded corners (a pill or a rounded panel) and wide soft
+// edges: no straight-edged plates in the mirror.
 float softbox(vec3 d, vec3 a, vec3 u, vec3 v, vec2 size, float soft) {
   float c = dot(d, a);
   if (c <= 0.05) return 0.0;
   vec3 q = d / c - a;
-  vec2 e = abs(vec2(dot(q, u), dot(q, v))) - size;
-  float sd = length(max(e, 0.0)) + min(max(e.x, e.y), 0.0);
+  float rc = min(size.x, size.y);
+  vec2 e = abs(vec2(dot(q, u), dot(q, v))) - (size - rc);
+  float sd = length(max(e, 0.0)) + min(max(e.x, e.y), 0.0) - rc;
   return 1.0 - smoothstep(-soft, soft, sd);
 }
 
@@ -137,6 +139,9 @@ const vec3 RIM_V = cross(RIM_A, RIM_U);
 const vec3 FILL_A = normalize(vec3(0.38, 0.12, 1.0));
 const vec3 FILL_U = normalize(cross(vec3(0.0, 1.0, 0.0), FILL_A));
 const vec3 FILL_V = cross(FILL_A, FILL_U);
+const vec3 LOW_A = normalize(vec3(0.25, -0.5, -0.85));
+const vec3 LOW_U = normalize(cross(vec3(0.0, 1.0, 0.0), LOW_A));
+const vec3 LOW_V = cross(LOW_A, LOW_U);
 
 // Dark studio in HDR (values above 1 are lights). Gels tint every light with
 // the state colour; the key keeps some white so highlights read as metal.
@@ -153,21 +158,25 @@ vec3 env(vec3 d) {
   vec3 sky = gel * (0.04 + 0.9 * zen) + key * 0.35 * zen * zen * zen;
   sky += cool * (0.22 * exp(-max(hy, 0.0) * 10.0) + 0.08 * exp(-max(hy, 0.0) * 3.0)); // glow band along the horizon
   // Black cards in the sky break it into bands, as in product shots of chrome.
-  float cards = softbox(d, CARD1_A, CARD1_U, CARD1_V, vec2(0.13, 0.9), 0.08);
-  cards = max(cards, softbox(d, CARD2_A, CARD2_U, CARD2_V, vec2(0.2, 0.9), 0.1));
+  float cards = softbox(d, CARD1_A, CARD1_U, CARD1_V, vec2(0.13, 0.9), 0.12);
+  cards = max(cards, softbox(d, CARD2_A, CARD2_U, CARD2_V, vec2(0.2, 0.9), 0.15));
   sky *= 1.0 - 0.92 * cards;
   // Floor: near black, a dim pool of gel light further down.
-  vec3 floorC = gel * (0.006 + 0.08 * smoothstep(-0.5, -1.0, d.y)) + 0.0008;
-  vec3 c = mix(floorC, sky, smoothstep(-0.03, 0.02, hy));
+  // Floor: dark under the horizon, then a pool of gel light bouncing up, so
+  // the lower half of the blob still shows its volume.
+  vec3 floorC = gel * (0.008 + 0.13 * smoothstep(-0.3, -0.95, d.y)) + 0.001;
+  vec3 c = mix(floorC, sky, smoothstep(-0.12, 0.06, hy));
   // Lights: a soft overhead key, a wide strip on the right, a gel strip behind.
-  c += key * 2.2 * softbox(d, KEY_A, KEY_U, KEY_V, vec2(0.85, 0.4), 0.25);
-  c += cool * 2.0 * softbox(d, STRIP_A, STRIP_U, STRIP_V, vec2(0.3, 0.9), 0.1);
-  c += gel * 2.5 * softbox(d, RIM_A, RIM_U, RIM_V, vec2(0.18, 0.6), 0.12);
+  c += key * 2.2 * softbox(d, KEY_A, KEY_U, KEY_V, vec2(0.85, 0.4), 0.35);
+  c += cool * 2.0 * softbox(d, STRIP_A, STRIP_U, STRIP_V, vec2(0.3, 0.9), 0.2);
+  c += gel * 2.5 * softbox(d, RIM_A, RIM_U, RIM_V, vec2(0.18, 0.6), 0.18);
+  // A low, wide gel light behind: coloured light wrapping the lower rim.
+  c += gel * 1.4 * softbox(d, LOW_A, LOW_U, LOW_V, vec2(1.0, 0.22), 0.35);
   // A broad diffusion panel behind the camera fills the centre of the blob, so
   // it reads as a mirror and never as a see-through lens.
   vec3 fill = mix(gel, key, 0.3) * 0.9;
   // One panel, off centre: a pair would read as eyes.
-  c += fill * softbox(d, FILL_A, FILL_U, FILL_V, vec2(0.34, 0.42), 0.22);
+  c += fill * softbox(d, FILL_A, FILL_U, FILL_V, vec2(0.34, 0.42), 0.3);
 #if QUALITY >= 1
   // Small hard lights: fine glints on the ripples.
   c += vec3(8.0) * pow(max(dot(d, normalize(vec3(0.5, 0.6, 0.62))), 0.0), 1600.0);
@@ -185,7 +194,7 @@ vec3 reflection(vec3 rd, vec3 n, vec3 p) {
   vec3 t = vec3(0.0, 1.0, 0.0) - n * n.y;
   t *= inversesqrt(max(dot(t, t), 1e-4));
   float streak = sin(dot(p, vec3(2.3, 6.5, 1.7)) - uFlow * 1.4) * sin(dot(p, vec3(-1.9, 4.1, 2.9)) + uFlow * 0.9);
-  float s = (0.03 + uAmp * 0.25 + uLevel * 0.08) * streak;
+  float s = (0.06 + uAmp * 0.45 + uLevel * 0.1) * streak;
   const vec3 k1 = vec3(4.0, 11.0, 3.0);
   const vec3 k2 = vec3(-7.0, 8.0, 5.0);
   vec3 g = k1 * cos(dot(p, k1) - uFlow * 2.1) + k2 * cos(dot(p, k2) + uFlow * 1.7);
@@ -200,9 +209,19 @@ vec3 reflection(vec3 rd, vec3 n, vec3 p) {
 float lavaDist(vec3 q, float r, float pull) {
   float d = 1e3;
   for (int i = 0; i < LOBES; i++) {
-    d = smin(d, length(q - uLobes[i].xyz * r * pull) - uLobes[i].w * r * 0.8, 0.25 * r);
+    vec3 dq = q - uLobes[i].xyz * r * pull;
+    dq.y *= 0.72; // wax stretches as it rises: lobes are taller than wide
+    d = smin(d, length(dq) - uLobes[i].w * r * (0.45 + 0.09 * float(i)), 0.16 * r);
   }
   return d;
+}
+
+// Glow of one lava sample: a soft halo outside the shape, then brighter
+// towards the core, so a slice through a lobe is never a flat disc.
+float lavaHeat(float ld, float r) {
+  float halo = exp(-max(ld, 0.0) / (0.035 * r));
+  float core = smoothstep(0.0, -0.2 * r, ld);
+  return halo * (0.18 + 0.82 * core * core);
 }
 
 void main() {
@@ -254,18 +273,16 @@ void main() {
       // Lava under the shell, sampled a little inside so it moves with depth.
       // Just under the skin (lobes that push the surface glow through it) and,
       // deeper along the ray, dimmer lava further inside.
-      float ld = lavaDist(p - n * r * 0.22, r, 1.0);
+      // The samples add up, like light through a volume.
+      float heat = lavaHeat(lavaDist(p - n * r * 0.22, r, 1.0), r);
 #if QUALITY >= 2
-      ld = min(ld, lavaDist(p + rd * r * 0.85, r, 0.6) + 0.03 * r); // same lobes, pulled inwards
+      heat += 0.85 * lavaHeat(lavaDist(p + rd * r * 0.85, r, 0.6), r); // same lobes, pulled inwards
 #endif
-      // Volumetric look: a soft skin, then brighter the deeper inside the lava.
-      float blob = smoothstep(0.06 * r, -0.08 * r, ld);
-      float depth = clamp(-ld / (0.35 * r), 0.0, 1.0);
-      float heat = blob * (0.35 + 0.65 * depth * depth);
-      vec3 hotLava = mix(uLava, vec3(1.0), 0.15 * depth * depth); // whiter in its core
+      float blob = min(heat, 1.0);
+      vec3 hotLava = mix(uLava, vec3(1.0), 0.2 * smoothstep(0.8, 1.6, heat)); // whiter in the core
       // Glow compressed per state, so the brightest state never turns flat white.
       float g = uGlow * (1.0 + uLevel * 0.6);
-      vec3 inner = uColor * 0.03 * g + hotLava * (1.0 - exp(-heat * 2.2)) * (0.3 + 0.45 * min(g, 1.3)) * (1.0 + 0.45 * uLevel); // the level pulses the lava in every state
+      vec3 inner = uColor * 0.03 * g + hotLava * (1.0 - exp(-heat * 2.0)) * 1.25 * (0.3 + 0.45 * min(g, 1.3)) * (1.0 + 0.45 * uLevel); // the level pulses the lava in every state
       // Thin rim lit from behind: the shell is slightly translucent there.
       float rim = pow(1.0 - ndv, 3.0);
       // Where lava presses on the skin the mirror thins and the glow comes through.
