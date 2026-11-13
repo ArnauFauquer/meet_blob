@@ -17,6 +17,11 @@ ArnauFauquer/Realm-Keeper `main`: `.github/workflows/tests.yml`, `build-and-push
 | Image only from a green commit: the build calls the tests workflow (`workflow_call`) first | `image.yml` job `tests` calls `ci.yml`; `build` needs it |
 | `docker/metadata-action` OCI labels, GHA build cache | kept |
 
+Observation from the first e2e runs on GitHub: on the 2-core runner the page's capture starts about 1.1 s
+after `getUserMedia` resolves (a 2 s recording arrived as 813-914 ms, twice; locally it is about 2 s). The
+"normal turn" spec now records 3 s with the same bounds (1.2-4 s). Whether the tablet loses the start of an
+utterance the same way is not known; worth a look when testing on the tablet.
+
 New in Blob: an `e2e` job (Playwright against the mock backend, 26 specs, about 2 min), and one CI run per
 commit: push runs for branches of this repository, `pull_request` runs only for forks.
 
