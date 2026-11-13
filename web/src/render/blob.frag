@@ -189,27 +189,23 @@ const vec3 LOW_V = cross(LOW_A, LOW_U);
 
 // Dark studio in HDR (values above 1 are lights). Gels tint every light with
 // the state colour; the key keeps some white so highlights read as metal.
-// Chrome reads through contrast: a bright sky over a dark floor, with tall
-// strips at the sides and a gel rim light behind. The horizon is a wide
-// gradient: a sharp one mirrors as a thin line that cuts the blob in two.
+// Chrome reads through contrast: a sky that brightens upwards, tall strips at
+// the sides and a gel rim light behind. There is no horizon: any edge or
+// ridge at that height mirrors as a line that cuts the blob in two.
 vec3 env(vec3 d) {
   vec3 gel = uColor;
   vec3 key = mix(vec3(1.0), gel, 0.55);
   vec3 cool = mix(vec3(1.0), gel, 0.8);
-  // The horizon sits a little below eye level, so it curves low on the blob.
-  float hy = d.y + 0.18;
   // Sky: broad and bright, in the gel colour, whiter towards the zenith.
   float zen = smoothstep(0.15, 1.0, d.y);
-  vec3 sky = gel * (0.04 + 0.9 * zen) + key * 0.35 * zen * zen * zen;
-  sky += cool * 0.14 * exp(-max(hy, 0.0) * 3.0); // wide glow above the horizon
+  vec3 sky = gel * (0.04 + 0.9 * zen) + key * 0.35 * zen * zen * zen + cool * 0.09;
   // Black cards in the sky break it into bands, as in product shots of chrome.
   float cards = softbox(d, CARD1_A, CARD1_U, CARD1_V, vec2(0.13, 0.9), 0.12);
   cards = max(cards, softbox(d, CARD2_A, CARD2_U, CARD2_V, vec2(0.2, 0.9), 0.15));
   sky *= 1.0 - 0.92 * cards;
-  // Floor: dark under the horizon, then a pool of gel light bouncing up, so
-  // the lower half of the blob still shows its volume.
-  vec3 floorC = gel * (0.008 + 0.13 * smoothstep(-0.3, -0.95, d.y)) + 0.001;
-  vec3 c = mix(floorC, sky, smoothstep(-0.35, 0.3, hy));
+  // A pool of gel light bouncing up from below, so the lower half of the blob
+  // still shows its volume.
+  vec3 c = sky + gel * 0.13 * smoothstep(-0.3, -0.95, d.y);
   // Lights: a soft overhead key, a wide strip on the right, a gel strip behind.
   c += key * 2.2 * softbox(d, KEY_A, KEY_U, KEY_V, vec2(0.85, 0.4), 0.35);
   c += cool * 2.0 * softbox(d, STRIP_A, STRIP_U, STRIP_V, vec2(0.3, 0.9), 0.2);
