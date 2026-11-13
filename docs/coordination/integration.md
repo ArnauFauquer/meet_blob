@@ -57,13 +57,22 @@ unit and mock-backend suites that the implementation sessions ran (their reports
   allows commands in its pod) is still reachable from any pod.
 - Whether a client disconnect stops a running Hermes request, and the Home Assistant example in `docs/alerts.md`.
 
-## To go live (needs the owner)
+## Deployed (2026-11-13)
 
-1. In `home_lab`, branch `feat/blob`: `terraform apply` (creates `blob-secrets`; needs the R2 credentials), merge
-   the branch to `main` so Argo deploys, and check that `blob.faukinator.com` resolves to Traefik. The image
-   is public (see `docs/coordination/reports/ci.md`), so the pull secret `github-docker-credentials` is no
-   longer needed in namespace `blob`; set `imagePullSecrets: []` in the chart (optional, a missing secret
-   only makes the kubelet warn).
-2. Read the device token (`terraform output` or the `blob-secrets` Secret) and open
-   `https://blob.faukinator.com/#t=<DEVICE_TOKEN>&device=tablet` once on the tablet.
-3. Test on the tablet and report what fails (microphone permission, audio unlock, wake word, performance).
+- `terraform apply -target` of the Blob resources only (namespace `blob`, Secret `blob-secrets`, the two
+  tokens); `HERMES_KEY` checked equal to Hermes' `API_SERVER_KEY`. `terraform plan` also shows drift on
+  `helm_release.argo-cd`, left alone. The R2 state credentials are in KWallet; `~/.local/bin/tf-home_lab`
+  runs terraform with them.
+- home_lab PR #109 merged (squash `eddcbc1`); Argo CD app `blob` Synced/Healthy, image `sha-6577d5c` (public,
+  no pull secret), pod on kube1, models ready in 71 s on the first start, certificate `blob-tls` ready.
+- Through the Ingress: `https://blob.faukinator.com/readyz` 200, `/device-config` 200 with the token and 401
+  without, and one real turn over `wss://blob.faukinator.com/ws` (`e2e_turn.py`, `question.wav`): PASS,
+  `stt_ms` 1048, `hermes_ms` 2753, `tts_ms` 500, `sc1_ms` 4801.
+
+## To test (the owner)
+
+1. Read the device token: `kubectl -n blob get secret blob-secrets -o jsonpath='{.data.DEVICE_TOKEN}' | base64 -d`
+   (or `tf-home_lab output -raw blob_device_token` in `home_lab/terraform`).
+2. Open `https://blob.faukinator.com/#t=<DEVICE_TOKEN>&device=tablet` once on the tablet (`desktop` on a PC).
+3. Test on the tablet and report what fails (microphone permission, audio unlock, wake word, performance, the
+   Traefik WebSocket timeout after 2+ minutes open).
