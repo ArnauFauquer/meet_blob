@@ -4,6 +4,16 @@
 
 Best screenshot: `docs/screenshots/thinking-1280x800.png`. Best still for idle as a painting: `docs/screenshots/idle-1280x800.png`. Motion: `docs/screenshots/motion/*.png`.
 
+## Review round 1
+
+All three coordinator notes are addressed (details: `docs/notes/look.md`, "Review round 1"):
+
+- **Lava.** Soft, volumetric and elongated: samples add up, each with a halo and a brighter core; lobes are taller than wide and of different sizes. Thinking lava is a deeper orange.
+- **Reflections.** Every light is a rounded panel or pill with soft edges, and the flow smear is about twice as strong.
+- **Lower half.** A soft horizon, a floor bounce of gel light, and a low gel rim light behind.
+
+The translucent rim, the lava colour per state and the motion speed are unchanged.
+
 ## Checks (run in `web/`, all passed on the final commit)
 
 | Command | Result |
@@ -16,7 +26,7 @@ Best screenshot: `docs/screenshots/thinking-1280x800.png`. Best still for idle a
 
 ## Cost
 
-Measured with `web/scripts/shader-bench.mjs` (one page, alternating frames, SwiftShader at 960x600). Quality 2 costs **1.46x** the old shader at idle and **1.45x** with the level at 0.7, inside the 1.5x target. Quality 1 costs 1.31x and quality 0 costs 1.20x. The page drops one tier when its frame interval averages over 50 ms for 4 s.
+Measured with `web/scripts/shader-bench.mjs` (one page, alternating frames, SwiftShader at 960x600). Quality 2 costs **1.43x** the old shader at idle and **1.39x** with the level at 0.7 (medians 1.45x), inside the 1.5x target. Quality 1 costs 1.31x and quality 0 costs 1.21x. The page drops one tier when its frame interval averages over 50 ms for 4 s.
 
 ## Interface changes others should know
 

@@ -8,14 +8,23 @@ Screenshots: `docs/screenshots/<state>-1280x800.png` and `-1024x768.png` (real f
 
 The first version read as a glossy glass or soap bubble: a small simple studio, a fresnel mix with the background (so the centre was darker than the rim and the blob looked like a lens), and lava shapes too faint to see.
 
-## What changed and why
+## Review round 1 (coordinator notes)
+
+| Note | Change |
+| --- | --- |
+| Thinking lava was a flat circular disc, like a sticker | A slice through a lobe gave a disc with a flat fill. The lava samples now add up like light through a volume. Each sample has a soft halo outside the shape (exponential falloff) and gets brighter towards the core. Lobes are 1.4x taller than wide (rising wax) and of different sizes (0.45 to 0.81 of the lobe radius), and merge with a tighter blend. Thinking lava is a deeper hot orange, `[1.0, 0.3, 0.03]`, so it separates from the amber body. |
+| Hard, straight-edged reflection plates in idle and listening | Every light is now a fully rounded panel or pill, with edges two to three times softer. The flow smear along the surface is about twice as strong (`0.06 + 0.45 amp`), so reflections bend and stretch with the liquid. |
+| Empty dark lower third crossed by a hard horizon | The horizon blend is about four times wider. The floor reflects a pool of gel light that grows towards the bottom, and a low, wide gel light behind wraps coloured light round the lower rim. The lower half now reads as volume. |
+| Keep the translucent rim, the lava colour per state and the calm motion | Unchanged. |
+
+## What changed and why (first pass, updated by the review where noted)
 
 | Change | Why |
 | --- | --- |
 | **Studio environment (`env()`).** A broad gel-tinted sky that brightens towards the zenith, a horizon set below eye level, a near-black floor with a dim pool of gel light, two black cards that cut the sky into bands, a large soft overhead key, a wide strip on the right, a gel rim strip behind on the left, one off-centre diffusion panel behind the camera, and two tiny hard lights for glints. Values above 1 are lights (HDR). | Chrome reads through contrast: broad bright areas against true blacks, split by a sharp horizon. Thin lines, like the first try's horizon line and thin strips, read as glass edges instead. The front panel fills the centre, so the blob reads as a mirror and not as a see-through lens. It is a single panel: two panels plus a floor strip made a smiley face. |
 | **Gels.** Every light is tinted by the state colour. The key keeps about half of its white, so strong highlights go towards white. | Mercury under coloured gels. Each state keeps a clear colour identity, and highlights still read as metal. |
 | **Material.** Schlick fresnel with a high base reflectance (`F = 0.68 + 0.32 (1 - n·v)^5`), a 30 % coloured reflectance that fades to white on hot highlights, and a trace of thin-film colour at grazing angles only. The background no longer shows through. | A dark, slightly translucent liquid metal, not a glass ball. |
-| **Lava (`lavaDist()`, new `uLava` colour per state).** The same lobes that push the surface are shrunk and merged into a distance field. It is sampled just under the skin (bulges glow through) and deeper along the ray, with the lobes pulled towards the centre, so blobs float inside. The look is volumetric: a soft skin, brighter and slightly whiter with depth. The emission is compressed (`1 - exp(-x)`), so bright states never go flat white. Where the lava presses on the skin, the mirror thins a little. | This is the visible lava-lamp life: blobs rise, merge and split inside (see the contact sheets). The lava has its own colour, like the wax in a lamp. With the body colour alone, the idle lava was invisible, because blue is perceptually dark. |
+| **Lava (`lavaDist()`, `lavaHeat()`, new `uLava` colour per state).** The same lobes that push the surface are shrunk, stretched upwards and merged into a distance field. It is sampled just under the skin (bulges glow through) and deeper along the ray, with the lobes pulled towards the centre, so blobs float inside. The samples add up; each has a soft halo and a brighter, slightly whiter core. The emission is compressed (`1 - exp(-x)`), so bright states never go flat white. Where the lava presses on the skin, the mirror thins a little. | This is the visible lava-lamp life: blobs rise, merge and split inside (see the contact sheets). The lava has its own colour, like the wax in a lamp. With the body colour alone, the idle lava was invisible, because blue is perceptually dark. |
 | **Lobes (`uLobes[5]`, computed on the CPU in `tables.ts` `lobes()`).** Each lobe rises and sinks on its own slow cycle (faster up, lazier down) and circles the vertical axis. Golden-angle phases keep any two lobes out of step. They reach further than before, so they bulge the skin. | The surface becomes lumpy, liquid chrome metaballs. On the CPU it is about 25 % cheaper than per-pixel trig in SwiftShader, and a global array filled in `main()` was slower still. |
 | **Flow-warped reflection (`reflection()`).** The normal leans along the upward surface tangent by a slow streak pattern, plus fine travelling ripples, as an analytic bump that only bends the normal. | Subtle anisotropic stretching and drifting of the reflections as the liquid moves, and fine glints, for one env tap. Three blurred taps ghosted visibly (triple horizon), so I dropped them. |
 | **Surface ripples in the SDF.** Three crossed sines replace the slow value-noise octave. The level noise is evaluated only when the level is above 0, at a lower frequency. | Cheaper. The lower frequency makes speech swells wobble instead of crumpling like foil. |
@@ -42,14 +51,16 @@ This machine was shared with other sessions (load average 4 to 18), so sequentia
 
 | Variant | Idle, min / median | Listening (level 0.7), min / median | Ratio to before (min) |
 | --- | --- | --- | --- |
-| Before | 69.1 / 75.6 ms | 84.4 / 89.0 ms | 1.00 |
-| After, quality 2 | 101.0 / 108.9 ms | 122.5 / 127.7 ms | **1.46 idle, 1.45 listening** |
-| After, quality 1 | 90.2 / 96.6 ms | 105.8 / 111.1 ms | 1.31 / 1.25 |
-| After, quality 0 | 82.9 / 90.0 ms | 100.3 / 105.0 ms | 1.20 / 1.19 |
+| Before | 74.0 / 78.2 ms | 89.9 / 92.8 ms | 1.00 |
+| After, quality 2 | 105.9 / 113.3 ms | 125.0 / 134.4 ms | **1.43 idle, 1.39 listening** (medians 1.45, 1.45) |
+| After, quality 1 | 96.8 / 104.0 ms | 112.9 / 118.3 ms | 1.31 / 1.26 |
+| After, quality 0 | 89.8 / 94.2 ms | 101.4 / 108.2 ms | 1.21 / 1.13 |
+
+These figures are after the review round. Before the review I measured 1.46x and 1.45x. The review changes first cost 1.54x; dropping a brightness gradient inside each light and a `sqrt` brought it back under the target.
 
     cd web && node scripts/shader-bench.mjs base=<(git show 576a5b6:web/src/render/blob.frag) cur=src/render/blob.frag q1=src/render/blob.frag:1 q0=src/render/blob.frag:0
 
-The film-strip spec also prints a sequential figure per tier (`frame cost at 1280x800`). It is less reliable under load. The last run gave quality 2: idle 119.5 ms, listening 129.5 ms; quality 0: 98.9 and 105.7 ms.
+The film-strip spec also prints a sequential figure per tier (`frame cost at 1280x800`). It is less reliable under load. The last run gave quality 2: idle 115.7 ms, listening 128.3 ms; quality 0: 94.0 and 105.0 ms.
 
 Where the time goes (removal tests, idle): lobes about 20 ms for three of them, env about 10 ms, lava about 6 ms, surface ripple about 6 ms. The average march length did not change (about 8.4 steps per marched pixel, before and after). The extra cost is per step.
 
@@ -59,9 +70,9 @@ Where the time goes (removal tests, idle): lobes about 20 ms for three of them, 
 
 ## What still looks weak (honest)
 
-- **Glass versus metal.** It now reads as dark liquid metal with lava inside, but the translucent rim and the floating lava keep some glass-sphere feeling, especially in idle. Making it more opaque would lose the lava; I chose the lava.
-- **The horizon.** The floor/sky split crosses the blob slightly below the middle as a soft bright lip. That is right for chrome, but in amber (thinking) it can suggest a liquid level in a glass.
-- **Thinking lava** turns yellow rather than deep orange after tone mapping. Amber is still clearly amber.
+- **Glass versus metal.** It reads as dark liquid metal with lava inside, but the translucent rim and the floating lava keep some glass-sphere feeling, especially in idle. Making it more opaque would lose the lava; I chose the lava. The softer lights (review round) trade a little of the crisp chrome sparkle for a more liquid look.
+- **The horizon** is now soft, but it still crosses the blob slightly below the middle as a faint lip.
+- **Lava contrast in bright states.** In speaking and thinking, the lava shows as soft, darker-orange or warm shapes rather than as bright glowing wax, because the body is already bright. In thinking, the lava often shows as one large soft oval: it is shaded and soft-edged, but not very elongated in every frame.
 - **Idle motion is slow** by design (one lobe cycle takes about 30 s at idle speed). Six seconds of film strip shows drift and one merge or split, not a full lava cycle.
 - **Speaking** pulses with the level through the lava glow (up to +45 % at full level) and the swells; the mirror itself does not brighten, so the pulse is moderate.
 - The thin-film iridescence is barely visible: on purpose, but it adds little.
