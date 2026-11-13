@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     hermes_connect_s: float = Field(5, gt=0)
     hermes_total_s: float = Field(75, gt=0)
     session_idle_s: float = Field(300, gt=0)
+    # S4: Blob's /alerts as Hermes reaches it; goes into the skill Blob sends with every request.
+    hermes_alerts_url: str = "http://blob.blob.svc.cluster.local:80"
 
     # S1: turn watchdogs
     listen_watchdog_s: float = Field(30, gt=0)
@@ -60,11 +62,11 @@ class Settings(BaseSettings):
     blob_fake_transcript: str = "¿Qué hora es?"
     blob_fake_lang: str = "es"
 
-    @field_validator("hermes_url")
+    @field_validator("hermes_url", "hermes_alerts_url")
     @classmethod
     def _strip_slash(cls, v: str) -> str:
         if not v.startswith(("http://", "https://")):
-            raise ValueError("HERMES_URL must start with http:// or https://")
+            raise ValueError("HERMES_URL and HERMES_ALERTS_URL must start with http:// or https://")
         return v.rstrip("/")
 
     @field_validator("quiet_hours")
