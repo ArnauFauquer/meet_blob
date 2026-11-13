@@ -1,14 +1,14 @@
 // S3: the wake word from a fake microphone playing synthetic Kokoro speech
-// ("Hey Jarvis.", then "What time is it?", then silence, looped), with the stock
-// hey_jarvis model. Against a real backend the device hf-wake needs wake=true
-// in config/devices.json.
+// ("Hey Blob.", then "What time is it?", then silence, looped), with the trained
+// hey_blob model that wake.json selects. Against a real backend the device hf-wake
+// needs wake=true in config/devices.json.
 import { expect, test } from '@playwright/test';
 import { micArgs } from './mics';
 import { dbg, openBlob, recv, sent, tracksStopped, waitFor } from './helpers';
 
-test.use({ launchOptions: { args: micArgs('hey-jarvis') } });
+test.use({ launchOptions: { args: micArgs('hey-blob') } });
 
-test('wake word: "hey jarvis" sends wake, the turn listens, the VAD ends it, nothing is sent before', async ({ page }) => {
+test('wake word: "hey blob" sends wake, the turn listens, the VAD ends it, nothing is sent before', async ({ page }) => {
   test.setTimeout(120_000);
   await openBlob(page, 'hf-wake');
   await expect.poll(() => dbg<{ wakeReady: boolean; vad: boolean }>(page, 'handsFree'), { message: 'models loaded', timeout: 30_000 })

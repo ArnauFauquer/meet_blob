@@ -1,1 +1,1 @@
-{ "model": "hey_jarvis_v0.1.onnx", "phrase": "hey jarvis", "threshold": 0.5 }
+{ "model": "hey_blob.onnx", "phrase": "hey blob", "threshold": 0.5 }

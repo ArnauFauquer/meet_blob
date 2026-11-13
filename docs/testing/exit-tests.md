@@ -135,7 +135,7 @@ failure, follow-up) are skipped unless `BLOB_SCENARIOS=1`.
 
 1.  Install with `#t=<DEVICE_TOKEN>&device=tablet` (`wake: true`, `sound: true`). Long press:
     the diagnostics view shows `wake: {ready: true, ...}` and `vad`.
-2.  Say "hey jarvis" (or the phrase in `web/public/models/wake.json`): the blob flashes and
+2.  Say "hey blob" (the phrase in `web/public/models/wake.json`): the blob flashes and
     listens; ask a question and stop talking; the utterance is sent about 0.7 s after the end
     of speech. Say nothing after the wake word: back to idle after 8 s (`turn_done empty`).
 3.  While a reply plays and for 0.5 s after it, saying the wake word does nothing.

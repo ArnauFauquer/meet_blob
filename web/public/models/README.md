@@ -8,7 +8,8 @@ downloads them.
 | --- | --- | --- | --- |
 | `melspectrogram.onnx` | openWakeWord audio front end: 16 kHz audio to 32-bin mel frames | [openWakeWord v0.5.1 release](https://github.com/dscripka/openWakeWord/releases/tag/v0.5.1) | openWakeWord states that its included pre-trained models are **CC BY-NC-SA 4.0** (README, "License"). The code is Apache-2.0. |
 | `embedding_model.onnx` | openWakeWord shared speech embedding (76 mel frames to 96 values), a re-implementation of Google's `speech_embedding` (TF Hub, Apache-2.0) | same release | treated as **CC BY-NC-SA 4.0** with the other release models (the README gives the Apache-2.0 origin of the architecture and weights; the release itself does not license this file separately) |
-| `hey_jarvis_v0.1.onnx` | stock wake word "hey jarvis" (16 embeddings to a score) | same release | **CC BY-NC-SA 4.0** (non-commercial, share-alike, attribution: David Scripka, openWakeWord) |
+| `hey_blob.onnx` | **the wake word in use**: "hey blob" (16 embeddings to a score), trained by the author with openWakeWord's training code on 2026-11-13 (`docs/wake-word-training.md`) | this repository | the author's own model. Its training data (Piper LibriTTS-R voices, ACAV100M features, AudioSet, MIT impulse responses) has mixed licences, some non-commercial: keep it to private use like the release models |
+| `hey_jarvis_v0.1.onnx` | stock wake word "hey jarvis" (16 embeddings to a score); no longer loaded by the page, kept for the pipeline unit test and as a fallback | same release | **CC BY-NC-SA 4.0** (non-commercial, share-alike, attribution: David Scripka, openWakeWord) |
 | `silero_vad_v5.onnx` | Silero voice-activity detector v5 (512-sample frames at 16 kHz) | copied from `@ricky0123/vad-web@0.0.31` (`dist/silero_vad_v5.onnx`), originally [snakers4/silero-vad](https://github.com/snakers4/silero-vad) | **MIT** (silero-vad); vad-web is ISC |
 | `wake.json` | which wake model file to load, its phrase and the score threshold | this repository | same as the repository |
 
@@ -17,13 +18,14 @@ SHA-256 of the files as committed:
 ```
 ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f  melspectrogram.onnx
 70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f  embedding_model.onnx
+a03097ad33097ec402865b6edb9acb685219145c8fdd0d55a1b15aa1bcb296b3  hey_blob.onnx
 94a13cfe60075b132f6a472e7e462e8123ee70861bc3fb58434a73712ee0d2cb  hey_jarvis_v0.1.onnx
 2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f  silero_vad_v5.onnx
 ```
 
 The CC BY-NC-SA 4.0 terms fit a private home assistant. They do not allow commercial use.
-A custom "hey blob" model trained by the author with openWakeWord's training code is the
-author's own model; see `docs/wake-word-training.md` for how to train one and drop it in here.
+`hey_blob.onnx` was trained by the author with openWakeWord's training code; see
+`docs/wake-word-training.md` for how it was trained, how well it does, and how to retrain it.
 
 The onnxruntime-web runtime (`ort-wasm-simd-threaded.wasm`, MIT) is not in this folder: Vite
 copies it from `node_modules/onnxruntime-web` into `dist/assets/` at build time.

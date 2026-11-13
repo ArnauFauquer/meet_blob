@@ -1,0 +1,13 @@
+diff --git a/generate_samples.py b/generate_samples.py
+index 349ebde..31f2663 100755
+--- a/generate_samples.py
++++ b/generate_samples.py
+@@ -71,7 +71,7 @@ def generate_samples(
+ 
+     _LOGGER.debug("Loading %s", model)
+     model_path = Path(model)
+-    model = torch.load(model_path)
++    model = torch.load(model_path, weights_only=False)
+     model.eval()
+     _LOGGER.info("Successfully loaded the model")
+ 

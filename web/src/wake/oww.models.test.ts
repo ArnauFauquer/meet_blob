@@ -31,4 +31,11 @@ describe('openWakeWord pipeline with the real models', () => {
   it('stays low on another sentence', async () => {
     expect(await maxScore(pcm16(file('../../e2e/fixtures/question.wav')))).toBeLessThan(0.1);
   }, 60_000);
+  it('fires on "hey blob" with the trained hey_blob model (Python reference 0.928)', async () => {
+    expect(await maxScore(pcm16(file('../../e2e/fixtures/hey-blob.wav')), 'hey_blob.onnx')).toBeGreaterThan(0.8);
+  }, 60_000);
+  it('hey_blob stays low on "hey jarvis" and another sentence', async () => {
+    expect(await maxScore(pcm16(file('../../e2e/fixtures/hey-jarvis.wav')), 'hey_blob.onnx')).toBeLessThan(0.1);
+    expect(await maxScore(pcm16(file('../../e2e/fixtures/question.wav')), 'hey_blob.onnx')).toBeLessThan(0.1);
+  }, 60_000);
 });

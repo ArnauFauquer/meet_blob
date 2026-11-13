@@ -2,9 +2,10 @@
 
 Run with the backend environment, which has kokoro-onnx and the model files:
 
-    cd backend && uv run python ../web/e2e/fixtures/make_fixtures.py [--model-dir ~/.cache/blob-models]
+    cd backend && uv run python ../web/e2e/fixtures/make_fixtures.py [--model-dir ~/.cache/blob-models] [names...]
 
-Writes 16 kHz mono 16-bit WAV files next to this script:
+Writes 16 kHz mono 16-bit WAV files next to this script (all of them, or only the names given):
+  hey-blob.wav    1 s silence, "Hey Blob.", 0.4 s, "What time is it?", 2.5 s silence
   hey-jarvis.wav  1 s silence, "Hey Jarvis.", 0.4 s, "What time is it?", 2.5 s silence
   question.wav    0.3 s silence, "What is the capital of France?", 4 s silence
 """
@@ -43,12 +44,20 @@ def write(name: str, *parts: np.ndarray) -> None:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--model-dir", default=str(Path.home() / ".cache/blob-models"))
+    p.add_argument("names", nargs="*", help="hey-blob, hey-jarvis, question (default: all)")
     a = p.parse_args()
     d = Path(a.model_dir).expanduser() / "kokoro"
     k = Kokoro(str(d / "kokoro-v1.0.onnx"), str(d / "voices-v1.0.bin"))
-    write("hey-jarvis.wav", silence(1.0), say(k, "Hey Jarvis.", "am_adam"), silence(0.4),
-          say(k, "What time is it?", "am_adam"), silence(2.5))
-    write("question.wav", silence(0.3), say(k, "What is the capital of France?", "af_heart"), silence(4.0))
+    clips = {
+        # am_puck: hey_blob.onnx scores am_adam's "Hey Blob." at 0.3 (see docs/wake-word-training.md)
+        "hey-blob": lambda: (silence(1.0), say(k, "Hey Blob.", "am_puck"), silence(0.4),
+                             say(k, "What time is it?", "am_puck"), silence(2.5)),
+        "hey-jarvis": lambda: (silence(1.0), say(k, "Hey Jarvis.", "am_adam"), silence(0.4),
+                               say(k, "What time is it?", "am_adam"), silence(2.5)),
+        "question": lambda: (silence(0.3), say(k, "What is the capital of France?", "af_heart"), silence(4.0)),
+    }
+    for name in a.names or clips:
+        write(f"{name}.wav", *clips[name]())
 
 
 if __name__ == "__main__":
