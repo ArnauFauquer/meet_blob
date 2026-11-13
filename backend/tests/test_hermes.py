@@ -30,6 +30,7 @@ def client(
         connect_s=5,
         total_s=total_s,
         session_idle_s=300,
+        alerts_url="http://blob.test",
         clock=clock or Clock(),
         transport=transport or httpx.ASGITransport(app=make_app(fake or FakeHermes())),
     )
@@ -42,14 +43,17 @@ async def test_request_body_and_headers() -> None:
     [req] = fake.requests
     assert req["headers"]["authorization"] == "Bearer secret"
     assert req["headers"]["x-hermes-session-id"] == "blob-1000000"
-    assert req["body"] == {
-        "model": "hermes-agent",
-        "stream": False,
-        "messages": [
-            {"role": "system", "content": SYSTEM_MESSAGE},
-            {"role": "user", "content": "¿Qué hora es?"},
-        ],
-    }
+    [system, user] = req["body"].pop("messages")
+    assert req["body"] == {"model": "hermes-agent", "stream": False}
+    assert user == {"role": "user", "content": "¿Qué hora es?"}
+    assert system["role"] == "system"
+    content = system["content"]
+    # The skill ships inside Blob: base rules, then the skill with the alerts URL filled in.
+    assert content.startswith(SYSTEM_MESSAGE)
+    assert "# Skill: how Blob works" in content
+    assert "{alerts_url}" not in content
+    assert "-X POST http://blob.test/alerts" in content
+    assert "epoch 1000000, UTC offset" in content
 
 
 async def test_session_kept_then_rotated_after_idle() -> None:

@@ -145,80 +145,20 @@ it; change the text (or `DELETE` it first) to raise it again.
 Blob has a local timer rule (`TIMER_RULE=on`, the default): a transcript such as "pon un
 temporizador de 10 minutos" becomes a timer before Hermes is called, and Hermes never sees it.
 Phrases the rule does not take (cancel, change, "how long is left", anything without a number
-and a unit) still go to Hermes. Once Hermes creates timers reliably with the skill below, set
+and a unit) still go to Hermes. Once Hermes creates timers reliably with the Blob skill below, set
 `TIMER_RULE=off` so every timer request goes to Hermes.
 
-Whether Hermes can call `/alerts` and report a failure is not verified (design: S0 Hermes test).
-The skill below is written for Hermes's terminal tool and `curl`. Give the Hermes pod the token
-as the environment variable `BLOB_ALERT_TOKEN`. The skill file format follows the common
-`SKILL.md` layout (YAML front matter, then instructions); check it against the deployed Hermes
-version before relying on it.
+The skill ships inside Blob: [`backend/blob/hermes_skill.md`](../backend/blob/hermes_skill.md).
+Blob appends it to the system message of every request to Hermes, with `{alerts_url}` replaced by
+`HERMES_ALERTS_URL` and the current local time added (for reminders at a time of day). Nothing is
+installed in Hermes, so a new Blob version updates the skill on its next turn. It tells Hermes what
+Blob is (replies are spoken), and how to set, list and cancel timers, reminders and notices with
+`curl`.
 
-Copy into `~/.hermes/skills/blob-timers/SKILL.md` on the Hermes host:
+The one thing Hermes needs on its side is the token: the environment variable
+`BLOB_ALERT_TOKEN` (Blob's `ALERT_TOKEN`) in the Hermes pod. In home_lab, Terraform writes it to
+the Secret `hermes-agent-blob`, which the Hermes chart loads with `envFrom`. The token is kept out
+of the prompt so it never lands in Hermes sessions or the model provider's logs.
 
-````markdown
----
-name: blob-timers
-description: Set, list and cancel kitchen timers and reminders on the Blob screens in the house. Use when the user asks for a timer, a countdown or a reminder in N minutes, or asks to cancel or check one.
----
-
-# Blob timers
-
-Blob is the voice assistant screen in the house. It shows timers and alerts. You control them
-with `curl` from the terminal. The token is in `$BLOB_ALERT_TOKEN`.
-
-Base URL: `http://blob.blob.svc.cluster.local:80`
-
-## Set a timer
-
-1. Work out the length in seconds (10 minutes = 600, half an hour = 1800).
-2. Write the alert text in the user's language: Spanish for Spanish or Catalan, English for
-   English. Example: "El temporizador de 10 minutos ha terminado." / "Your 10 minute timer is done."
-3. Run (replace SECONDS, TEXT and LANG, where LANG is `es` or `en`):
-
-```sh
-curl -sS -o /tmp/blob.json -w '%{http_code}\n' -X POST http://blob.blob.svc.cluster.local:80/alerts \
-  -H "Authorization: Bearer $BLOB_ALERT_TOKEN" -H 'Content-Type: application/json' \
-  -d "{\"key\": \"timer-$(date +%s)\", \"source\": \"timer\", \"in_s\": SECONDS, \"text\": \"TEXT\", \"lang\": \"LANG\"}"
-cat /tmp/blob.json
-```
-
-4. The first line printed is the HTTP status. `201` means the timer is set: confirm in one short
-   sentence ("Vale, temporizador de 10 minutos."). Any other status, or a curl error, means it
-   failed: tell the user the timer was NOT set. Do not pretend it worked.
-
-Two timers of the same length are fine: each gets its own key.
-
-## List timers
-
-```sh
-curl -sS http://blob.blob.svc.cluster.local:80/alerts -H "Authorization: Bearer $BLOB_ALERT_TOKEN"
-```
-
-The answer is a JSON array of `{"key", "state", "fire_at"}`. Timers have keys starting with
-`timer-`. `state` is `pending` (still counting), `active` (ringing on the screen) or `acked`
-(already heard). `fire_at` is the UTC epoch second when it rings; `date +%s` gives the current
-one. Remaining seconds = `fire_at - now`.
-
-## Cancel a timer
-
-1. List timers (above) and pick the one the user means: the only pending one, or the one whose
-   remaining time matches what the user says. If several match, ask which one.
-2. Delete it:
-
-```sh
-curl -sS -o /dev/null -w '%{http_code}\n' -X DELETE \
-  http://blob.blob.svc.cluster.local:80/alerts/KEY -H "Authorization: Bearer $BLOB_ALERT_TOKEN"
-```
-
-3. `204` means it is cancelled. Anything else: say it could not be cancelled.
-
-## Rules
-
-- Only create keys that start with `timer-` for timers. Never delete keys that do not start with
-  `timer-` unless the user asks for that exact alert.
-- Keep spoken confirmations to one short sentence, no markdown.
-````
-
-The skill only needs `curl`, `date` and the terminal tool. If Hermes runs outside the cluster,
-replace the base URL with `https://<blob host>`.
+The skill only needs `curl`, `date` and the terminal tool. If Hermes runs outside the cluster, set
+`HERMES_ALERTS_URL=https://<blob host>`.

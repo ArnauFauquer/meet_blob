@@ -105,6 +105,7 @@ def create_app(
             settings.hermes_connect_s,
             settings.hermes_total_s,
             settings.session_idle_s,
+            settings.hermes_alerts_url,
             transport=hermes_transport,
         )
         st.hub = Hub(settings.device_token, lambda: st.ready, devices)
