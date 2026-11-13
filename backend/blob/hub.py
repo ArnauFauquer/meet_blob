@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 from . import __version__, turnlog
 from .alerts import Alerts
 from .auth import token_ok
+from .debugaudio import AudioDump
 from .devices import Device
 from .schemas import (
     AlertAck,
@@ -73,6 +74,7 @@ class Hub:
         self._broadcast_lock = asyncio.Lock()
         self.turns: TurnManager  # set by main once the turn manager exists
         self.alerts: Alerts  # set by main once the alert store exists
+        self.audio_dump: AudioDump | None = None  # DEBUG_AUDIO_DIR: keep utterances as WAV
         self._handlers: dict[str, Handler] = {
             "tap": self._tap,
             "utterance": self._utterance,
@@ -165,6 +167,8 @@ class Hub:
             await conn.send(Error(code=ErrorCode.BAD_MESSAGE))
             await self.turns.cancel(conn, utt.turn)
             return
+        if self.audio_dump is not None and self.turns.accepts_utterance(conn, utt.turn):
+            self.audio_dump.save(conn.device, utt.turn, data)
         if not await self.turns.submit(conn, utt.turn, data, utt.tail_silence_ms):
             await conn.send(Error(code=ErrorCode.BAD_MESSAGE))
 

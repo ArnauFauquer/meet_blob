@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     # itself through POST /alerts.
     timer_rule: bool = True
 
+    # Debug switch: keep the last DEBUG_AUDIO_KEEP utterances as WAV files in this folder (off when
+    # empty). Personal voice recordings: turn it off and delete the folder after debugging.
+    debug_audio_dir: str = ""
+    debug_audio_keep: int = Field(20, ge=1, le=500)
+
     # Development switch: canned transcript and tone audio instead of the speech models.
     blob_fake_models: bool = False
     blob_fake_transcript: str = "¿Qué hora es?"
