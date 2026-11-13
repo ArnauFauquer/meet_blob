@@ -132,7 +132,7 @@ vec3 env(vec3 d) {
   // Sky: broad and bright, in the gel colour, whiter towards the zenith.
   float zen = smoothstep(0.15, 1.0, d.y);
   vec3 sky = gel * (0.04 + 0.9 * zen) + key * 0.35 * zen * zen * zen;
-  sky += cool * (0.45 * exp(-max(hy, 0.0) * 16.0) + 0.1 * exp(-max(hy, 0.0) * 4.0)); // glow band along the horizon
+  sky += cool * (0.22 * exp(-max(hy, 0.0) * 10.0) + 0.08 * exp(-max(hy, 0.0) * 3.0)); // glow band along the horizon
   // Black cards in the sky break it into bands, as in product shots of chrome.
   float cards = softbox(d, normalize(vec3(0.55, 0.45, 0.45)), vec3(0.0, 1.0, 0.0), vec2(0.13, 0.9), 0.08);
   cards = max(cards, softbox(d, normalize(vec3(-0.6, 0.4, -0.35)), vec3(0.0, 1.0, 0.0), vec2(0.2, 0.9), 0.1));
@@ -175,11 +175,11 @@ vec3 reflection(vec3 rd, vec3 n, vec3 p) {
 
 // Lava seen through the dark shell: the same lobes that push the surface,
 // shrunk and merged into a distance field, sampled a little below the hit
-// point. Negative inside a lava shape.
-float lavaDist(vec3 q, float r) {
+// point (`pull` < 1 draws the lobes towards the centre). Negative inside.
+float lavaDist(vec3 q, float r, float pull) {
   float d = 1e3;
   for (int i = 0; i < LOBES; i++) {
-    d = smin(d, length(q - uLobes[i].xyz * r) - uLobes[i].w * r * 0.8, 0.25 * r);
+    d = smin(d, length(q - uLobes[i].xyz * r * pull) - uLobes[i].w * r * 0.8, 0.25 * r);
   }
   return d;
 }
@@ -233,18 +233,18 @@ void main() {
       // Lava under the shell, sampled a little inside so it moves with depth.
       // Just under the skin (lobes that push the surface glow through it) and,
       // deeper along the ray, dimmer lava further inside.
-      float ld = lavaDist(p - n * r * 0.22, r);
+      float ld = lavaDist(p - n * r * 0.22, r, 1.0);
 #if QUALITY >= 1
-      ld = min(ld, lavaDist(p + rd * r * 0.5, r) + 0.03 * r);
+      ld = min(ld, lavaDist(p + rd * r * 0.85, r, 0.6) + 0.03 * r); // same lobes, pulled inwards
 #endif
       // Volumetric look: a soft skin, then brighter the deeper inside the lava.
       float blob = smoothstep(0.06 * r, -0.08 * r, ld);
       float depth = clamp(-ld / (0.35 * r), 0.0, 1.0);
       float heat = blob * (0.35 + 0.65 * depth * depth);
-      vec3 hotLava = mix(uLava, vec3(1.0), 0.3 * depth); // whiter in its core
+      vec3 hotLava = mix(uLava, vec3(1.0), 0.15 * depth * depth); // whiter in its core
       // Glow compressed per state, so the brightest state never turns flat white.
       float g = uGlow * (1.0 + uLevel * 0.6);
-      vec3 inner = uColor * 0.03 * g + hotLava * (1.0 - exp(-heat * 2.2)) * (0.15 + 0.3 * min(g, 1.3));
+      vec3 inner = uColor * 0.03 * g + hotLava * (1.0 - exp(-heat * 2.2)) * (0.3 + 0.45 * min(g, 1.3));
       // Thin rim lit from behind: the shell is slightly translucent there.
       float rim = pow(1.0 - ndv, 3.0);
       // Where lava presses on the skin the mirror thins and the glow comes through.
