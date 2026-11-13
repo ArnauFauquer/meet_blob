@@ -5,6 +5,8 @@
 Options: --empty sends a zero-length utterance; --cancel-after S cancels S seconds after the
 utterance; --busy-check taps from a second connection while the turn is open and expects
 error busy; --expect-error CODE expects the tap itself to get that error (for not_ready).
+S3: --wake sends wake instead of tap (--followup sets wake.followup; use --device tablet);
+--expect-followup true|false checks the tts followup flag.
 Exit status 0 when every expectation holds.
 """
 
@@ -70,12 +72,16 @@ def turn(stack: ExitStack) -> int:
     p.add_argument("--expect", help="expected turn_done reason")
     p.add_argument("--expect-error", help="expected error code for the tap")
     p.add_argument("--save-tts", help="write the received WAV here")
+    p.add_argument("--wake", action="store_true", help="start with wake instead of tap")
+    p.add_argument("--followup", action="store_true", help="wake.followup = true")
+    p.add_argument("--expect-followup", choices=["true", "false"])
     a = p.parse_args()
     failures: list[str] = []
     t0 = time.monotonic()
 
     ws = open_session(stack, a.url, a.token, a.device, t0)
-    ws.send(json.dumps({"type": "tap"}))
+    start = {"type": "wake", "followup": a.followup} if a.wake else {"type": "tap"}
+    ws.send(json.dumps(start))
     if a.expect_error:
         msg = recv(ws, t0)
         ok = msg == {"type": "error", "code": a.expect_error}
@@ -118,6 +124,7 @@ def turn(stack: ExitStack) -> int:
         ws.send(json.dumps({"type": "cancel", "turn": turn}))
 
     tts: bytes | None = None
+    followup = None
     expect_frame = False
     while True:
         msg = recv(ws, t0)
@@ -128,6 +135,7 @@ def turn(stack: ExitStack) -> int:
             continue
         if msg["type"] == "tts":
             expect_frame = True
+            followup = msg["followup"]
         if msg["type"] == "turn_done":
             done = msg
             break
@@ -146,6 +154,8 @@ def turn(stack: ExitStack) -> int:
         failures.append(f"reason {done['reason']}, expected {a.expect}")
     if a.expect == "ok" and tts is None:
         failures.append("no tts audio")
+    if a.expect_followup and str(followup).lower() != a.expect_followup:
+        failures.append(f"followup {followup}, expected {a.expect_followup}")
     print(f"timings: {json.dumps(done['timings'])}")
     print(
         f"RESULT reason={done['reason']} timeout_kind={done['timeout_kind']}: "

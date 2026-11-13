@@ -17,6 +17,7 @@ from blob.main import create_app
 from tests.fakes.fake_hermes import FakeHermes, make_app
 
 TOKEN = "test-device-token"
+ALERT_TOKEN = "test-alert-token"
 CLIPS = Path(__file__).parent / "clips"
 
 
@@ -26,6 +27,7 @@ def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
         "hermes_key": "test-key",
         "hermes_model": "hermes-agent",
         "device_token": TOKEN,
+        "alert_token": ALERT_TOKEN,
         "db_path": str(tmp_path / "blob.db"),
         "static_dir": str(tmp_path / "no-page"),
         "devices_path": str(tmp_path / "devices.json"),
@@ -58,13 +60,17 @@ def wait_ready(client: TestClient, timeout: float = 5.0) -> None:
 def app_factory(tmp_path: Path, hermes_transport: httpx.AsyncBaseTransport) -> Iterator[Any]:
     """Build an app with fake models and the fake Hermes; keyword arguments override settings."""
 
-    def build(models: tuple[Any, Any] | None = None, **overrides: Any) -> FastAPI:
+    def build(
+        models: tuple[Any, Any] | None = None,
+        wall: Callable[[], float] = time.time,
+        **overrides: Any,
+    ) -> FastAPI:
         s = make_settings(tmp_path, **overrides)
         models = models or (
             FakeStt(s.blob_fake_transcript, s.blob_fake_lang, s.silence_rms),
             FakeTts(),
         )
-        return create_app(s, models=models, hermes_transport=hermes_transport)
+        return create_app(s, models=models, hermes_transport=hermes_transport, wall=wall)
 
     yield build
 

@@ -3,7 +3,8 @@
     uv run python scripts/make_test_clips.py [--model-dir .models]
 
 Writes 16 kHz mono 16-bit WAV files: es.wav, en.wav, ca.wav (Catalan text read by the Spanish
-voice, so detection may say "es"), and silence.wav.
+voice, so detection may say "es"), timer_es.wav ("pon un temporizador de 1 minuto", for the
+timer rule), and silence.wav.
 """
 
 import argparse
@@ -20,6 +21,7 @@ TEXTS = {
     "es": ("¿Cuál es la capital de Francia?", "es"),
     "en": ("What is the capital of France?", "en"),
     "ca": ("Quina és la capital de França?", "ca"),
+    "timer_es": ("Pon un temporizador de un minuto.", "es"),
 }
 
 

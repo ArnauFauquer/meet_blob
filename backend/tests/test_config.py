@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from blob.config import Settings
 from tests.conftest import make_settings
 
-REQUIRED = ("HERMES_URL", "HERMES_KEY", "HERMES_MODEL", "DEVICE_TOKEN")
+REQUIRED = ("HERMES_URL", "HERMES_KEY", "HERMES_MODEL", "DEVICE_TOKEN", "ALERT_TOKEN")
 
 
 def test_defaults(tmp_path: Path) -> None:
@@ -18,6 +18,7 @@ def test_defaults(tmp_path: Path) -> None:
     assert (s.retention_days, s.host, s.port) == (14, "0.0.0.0", 8000)
     assert s.hermes_history_mode == "session"
     assert (s.followup_listen_s, s.listen_no_speech_s, s.quiet_hours) == (6, 8, "")
+    assert (s.followup_max, s.timer_rule) == (3, True)
 
 
 def test_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -26,14 +27,18 @@ def test_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "HERMES_KEY": "k",
         "HERMES_MODEL": "hermes-agent",
         "DEVICE_TOKEN": "t",
+        "ALERT_TOKEN": "a",
         "PORT": "9000",
         "BLOB_FAKE_MODELS": "1",
+        "TIMER_RULE": "off",
+        "FOLLOWUP_MAX": "5",
     }.items():
         monkeypatch.setenv(name, value)
     s = Settings(_env_file=None)  # type: ignore[call-arg]
     assert s.hermes_url == "http://hermes:8642"  # trailing slash removed
     assert s.port == 9000
     assert s.blob_fake_models is True
+    assert (s.alert_token, s.timer_rule, s.followup_max) == ("a", False, 5)
 
 
 @pytest.mark.parametrize("missing", REQUIRED)
@@ -56,6 +61,9 @@ def test_required(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
         {"kokoro_device": "tpu"},
         {"quiet_hours": "22-07"},
         {"device_token": ""},
+        {"alert_token": ""},
+        {"followup_max": -1},
+        {"timer_rule": "maybe"},
     ],
 )
 def test_validation(tmp_path: Path, override: dict[str, object]) -> None:

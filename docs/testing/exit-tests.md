@@ -91,10 +91,90 @@ browser.
 
 *To be written in S2.*
 
-## S3: hands-free
+## S3 and S4: backend exit test (run on 2026-11-13, CPU only, fake Hermes)
 
-*To be written in S3.*
+This part needs no page, no GPU, no tablet and no real Hermes. Every step passed on commit
+`dc3e521` (branch `t3/blob-backend-s3-s4`). Setup, from `backend/`:
 
-## S4: alerts and timers
+```sh
+uv sync
+uv run python scripts/make_test_clips.py --model-dir <MODEL_DIR>   # adds timer_es.wav
+uv run python tests/fakes/fake_hermes.py --port 18642 &            # step 7: --mode question
+COMMON="HERMES_URL=http://127.0.0.1:18642 HERMES_KEY=dev-key HERMES_MODEL=hermes-agent \
+  DEVICE_TOKEN=devtoken ALERT_TOKEN=alerttoken STATIC_DIR=../web/dist \
+  DEVICES_PATH=../config/devices.example.json PORT=18000"
+A() { uv run python scripts/e2e_alerts.py --url ws://127.0.0.1:18000/ws --token devtoken \
+  --alert-token alerttoken --hermes http://127.0.0.1:18642 "$@"; }
+E() { uv run python scripts/e2e_turn.py --url ws://127.0.0.1:18000/ws --token devtoken "$@"; }
+```
 
-*To be written in S4.*
+1.  Static checks: `uv run ruff check`, `uv run ruff format --check`, `uv run mypy blob` report
+    no issues.
+2.  Unit tests: `uv run pytest -m "not gpu" --cov --cov-fail-under=80`: 300 passed, coverage
+    98.95%. New files: `test_alerts_api.py` (every rule of the contract table), `test_scheduler.py`
+    (injected clock, 250 ms cap, late firing, `ttl_s`, 24 h after ack, restart with a real
+    SQLite file and the app object restarted twice), `test_timer_rule.py`; additions to
+    `test_hub.py` (wake gating, alerts in the snapshot, `alert_read`/`alert_ack`, a 1 s timer,
+    the voice timer, `TIMER_RULE=off`), `test_turn.py` (follow-up flag, `FOLLOWUP_MAX` chain,
+    10 s idle reset, timer rule), `test_db.py` (an S1 file opens with S4 code),
+    `test_textclean.py` (`ends_with_question`), `test_config.py`, `test_protocol.py`.
+3.  Fake models: `env $COMMON BLOB_FAKE_MODELS=1 BLOB_FAKE_TRANSCRIPT="pon un temporizador de 1
+    minuto" DB_PATH=/tmp/fake.db uv run blob`, then `A`: 13/13 checks passed. Alert over HTTP
+    seen in the snapshot of two connections after 6 ms; `alert_read` gave `tts{alert: key, turn:
+    null, final: true}` and a 24 kHz WAV; `alert_ack` removed it from the snapshot and
+    `GET /alerts` showed `acked`; `alert_read` of an unknown key gave `error{bad_message}`; a timer
+    with `in_s: 2` fired after 1.58 s (whole-second `fire_at`) and the snapshot changed; the
+    spoken timer turn ended `ok` with audio and `hermes_ms: null`, created
+    `timer-<unix time>` pending 60 s ahead, and the fake Hermes counted 0 requests; `wake` from
+    `desktop` got `bad_message` and from `tablet` opened a turn.
+4.  Restart: with the same server, `POST` an urgent alert and a timer with `in_s: 4`, stop the
+    server (SIGTERM), wait 6 s, start it again on the same `DB_PATH`. `GET /alerts` shows both
+    `active`, and the first snapshot after `hello` lists the door alert (`late: false`) and the
+    timer with `late: true` and `activated_at` equal to its `fire_at`.
+5.  Real models: `env $COMMON STT_MODEL=small STT_COMPUTE=int8 MODEL_DIR=<MODEL_DIR>
+    DB_PATH=/tmp/real.db uv run blob` (ready in 14.8 s), then
+    `A --timer-wav tests/clips/timer_es.wav`: 13/13 checks passed. Whisper heard "Pon un
+    temporizador de un minuto." (`es`, `stt_ms` 4226), the timer rule created
+    `timer-1794524734` with `in_s` 60, the confirmation "Vale, temporizador de 1 minuto." was
+    synthesised (`tts_ms` 637), and the fake Hermes counted 0 requests. `alert_read` gave a
+    2.13 s Kokoro WAV. Then `E --wav tests/clips/es.wav --expect ok` still reached Hermes (1
+    request, the exact transcript).
+6.  Lines printed by the server for step 5:
+
+    ```json
+    {"kind": "timer_rule", "turn": 1, "key": "timer-1794524734", "in_s": 60}
+    {"kind": "turn", "turn": 1, "reason": "ok", "timeout_kind": null, "lang": "es", "stt_ms": 4226, "hermes_ms": null, "tts_ms": 637, "first_audio_ms": 4864, "sc1_ms": 5364}
+    ```
+
+7.  Follow-up chain (fake models, fake Hermes `--mode question`, whose reply ends with `?`):
+    `E --wav tests/clips/es.wav --device tablet --wake --expect ok --expect-followup true`,
+    then three times `E ... --wake --followup` expecting `true`, `true`, `false` (the 4th reply in
+    a row is capped by `FOLLOWUP_MAX=3`), then `E --device tablet --wake --followup --empty
+    --expect empty` (no speech in the follow-up window), then a new chain gets `true` again. All
+    passed. `E --device desktop --wake --expect-error bad_message` passed.
+8.  `docs/alerts.md`: every `curl` command in it was run against the server (201, 201, 201, the
+    Hermes skill's create with the `%{http_code}` line, list, `DELETE` 204 twice); a `fire_at`
+    without an offset got 422 and a request without the token got 401. The Home Assistant YAML
+    was not run.
+
+### Full S3 exit test (not run; needs the page, the tablet and the wake word)
+
+From the design. Run on the tablet with the deployed backend and the real Hermes.
+
+1.  Follow-up: a reply that ends with a question opens the microphone for 6 s without the wake
+    word; silence returns to idle; answering "sí" continues the conversation.
+2.  Three days with the TV on: count wake-word false accepts (SC2: fewer than 1 per day) and
+    misses (fewer than 2 in 10 attempts).
+3.  Replay recorded TV or radio audio through the detector faster than real time, when the
+    detector allows it (otherwise skipped).
+4.  Manual: VAD limits (8 s no speech, 15 s total), microphone permission after a restart.
+
+### Full S4 exit test (not run; needs the page and the deployment)
+
+1.  An alert is visible after a pod restart.
+2.  A voice timer works end to end: "pon un temporizador de 10 minutos", the triangle in red after
+    10 minutes, a tap reads it and clears it; the same timer twice gives two timers.
+3.  An alert from `curl` shows the right shape within 1 s (SC5), measured with `curl` timestamps
+    against a 60 fps screen recording.
+4.  Whether Hermes can create and cancel timers with the skill in `docs/alerts.md`; if it can,
+    set `TIMER_RULE=off` and repeat item 2 through Hermes.

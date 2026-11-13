@@ -9,8 +9,12 @@ from fastapi import WebSocket
 from pydantic import BaseModel, ValidationError
 
 from . import __version__, turnlog
+from .alerts import Alerts
 from .auth import token_ok
+from .devices import Device
 from .schemas import (
+    AlertAck,
+    AlertRead,
     Cancel,
     ClientEvent,
     Error,
@@ -20,7 +24,9 @@ from .schemas import (
     Pong,
     Snapshot,
     State,
+    Tts,
     Utterance,
+    Wake,
     client_message,
 )
 from .turn import TurnManager
@@ -54,19 +60,28 @@ Handler = Callable[[Connection, Any], Awaitable[None]]
 
 
 class Hub:
-    def __init__(self, device_token: str, is_ready: Callable[[], bool]) -> None:
+    def __init__(
+        self,
+        device_token: str,
+        is_ready: Callable[[], bool],
+        devices: dict[str, Device] | None = None,
+    ) -> None:
         self._token = device_token
         self._is_ready = is_ready
+        self._devices = devices or {}
         self.clients: set[Connection] = set()
         self._broadcast_lock = asyncio.Lock()
         self.turns: TurnManager  # set by main once the turn manager exists
-        # S3 adds "wake"; S4 adds "alert_read" and "alert_ack".
+        self.alerts: Alerts  # set by main once the alert store exists
         self._handlers: dict[str, Handler] = {
             "tap": self._tap,
             "utterance": self._utterance,
             "cancel": self._cancel,
             "ping": self._ping,
             "client_event": self._client_event,
+            "wake": self._wake,
+            "alert_read": self._alert_read,
+            "alert_ack": self._alert_ack,
         }
 
     async def broadcast(self) -> None:
@@ -81,8 +96,15 @@ class Hub:
                 await c.send(state)
                 await c.send(snap)
 
+    async def broadcast_snapshot(self) -> None:
+        """Alert changes: a snapshot to every client (state is only for turn transitions)."""
+        async with self._broadcast_lock:
+            snap = self._snapshot()
+            for c in list(self.clients):
+                await c.send(snap)
+
     def _snapshot(self) -> Snapshot:
-        return Snapshot(conv=self.turns.conv, alerts=[])
+        return Snapshot(conv=self.turns.conv, alerts=self.alerts.items())
 
     async def serve(self, ws: WebSocket) -> None:
         await ws.accept()
@@ -151,6 +173,33 @@ class Hub:
             await conn.send(Error(code=ErrorCode.NOT_READY))
         elif await self.turns.start(conn) is None:
             await conn.send(Error(code=ErrorCode.BUSY))
+
+    async def _wake(self, conn: Connection, msg: Wake) -> None:
+        """Starts a turn like a tap, only from a device marked wake=true in devices.json."""
+        if not self._devices.get(conn.device, Device()).wake:
+            await conn.send(Error(code=ErrorCode.BAD_MESSAGE))
+        else:
+            await self._tap(conn, msg)
+
+    async def _alert_read(self, conn: Connection, msg: AlertRead) -> None:
+        if not self._is_ready():
+            await conn.send(Error(code=ErrorCode.NOT_READY))
+            return
+        alert = self.alerts.active(msg.key)
+        if alert is None or self.turns.current is not None:
+            await conn.send(Error(code=ErrorCode.BAD_MESSAGE))
+            return
+        try:
+            wav = await self.turns.synth(alert.text, alert.lang)
+        except Exception:
+            # The page keeps the alert and plays its beep.
+            log.exception("synthesis failed for alert %s", msg.key)
+            await conn.send(Error(code=ErrorCode.BAD_MESSAGE))
+            return
+        await conn.send(Tts(turn=None, alert=msg.key, seq=0, final=True), wav)
+
+    async def _alert_ack(self, conn: Connection, msg: AlertAck) -> None:
+        await self.alerts.ack(msg.key)
 
     async def _utterance(self, conn: Connection, msg: Utterance) -> None:
         if not self.turns.accepts_utterance(conn, msg.turn):
