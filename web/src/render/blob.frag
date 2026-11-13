@@ -265,7 +265,7 @@ void main() {
       vec3 hotLava = mix(uLava, vec3(1.0), 0.15 * depth * depth); // whiter in its core
       // Glow compressed per state, so the brightest state never turns flat white.
       float g = uGlow * (1.0 + uLevel * 0.6);
-      vec3 inner = uColor * 0.03 * g + hotLava * (1.0 - exp(-heat * 2.2)) * (0.3 + 0.45 * min(g, 1.3));
+      vec3 inner = uColor * 0.03 * g + hotLava * (1.0 - exp(-heat * 2.2)) * (0.3 + 0.45 * min(g, 1.3)) * (1.0 + 0.45 * uLevel); // the level pulses the lava in every state
       // Thin rim lit from behind: the shell is slightly translucent there.
       float rim = pow(1.0 - ndv, 3.0);
       // Where lava presses on the skin the mirror thins and the glow comes through.
