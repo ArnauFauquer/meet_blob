@@ -4,7 +4,7 @@
 # Models are NOT in the image; they download to MODEL_DIR (/data/models, the PVC) on first start.
 
 # --- Stage 1: build the page -------------------------------------------------
-FROM node:24.22.2-trixie-slim AS web
+FROM node:24.22.3-trixie-slim AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
