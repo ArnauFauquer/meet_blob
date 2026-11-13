@@ -51,7 +51,8 @@ test('wake clips: an attempt sends its audio when the server keeps debug audio',
   const i = l.findIndex((e) => e.dir === 'send' && e.data?.type === 'wake_clip');
   expect(l[i].data).toMatchObject({ type: 'wake_clip', label: 'auto', peak: expect.any(Number) });
   expect(l[i].data!.peak as number).toBeGreaterThanOrEqual(0.1);
-  expect(l[i + 1].data!.binary).toBe((l[i].data!.dur_ms as number) * 32); // 16 kHz s16le
+  // 16 kHz s16le is 32 bytes per ms; dur_ms is rounded, so compare in whole ms.
+  expect(Math.round((l[i + 1].data!.binary as number) / 32)).toBe(l[i].data!.dur_ms);
 });
 
 test('enrollment (?enroll=pos): one clip per phrase, no turn starts', async ({ page }) => {
