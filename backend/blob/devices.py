@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 
 class Device(BaseModel):
     sound: bool = False
-    wake: bool = False
+    wake: bool = True
 
 
 class DeviceConfig(BaseModel):
@@ -31,7 +31,7 @@ def load_devices(path: str) -> dict[str, Device]:
     """A missing file means no device has sound or wake; a malformed file stops startup."""
     p = Path(path)
     if not p.exists():
-        log.warning("devices file %s not found; every device gets sound=false, wake=false", path)
+        log.warning("devices file %s not found; every device gets sound=false, wake=true", path)
         return {}
     try:
         return _devices.validate_python(json.loads(p.read_text()))

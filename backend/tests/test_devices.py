@@ -50,4 +50,4 @@ def test_device_config(tmp_path: Path, app_factory: Any) -> None:
         "listen_no_speech_s": 8.0,
         "silence_rms": 0.01,
     }
-    assert (other["sound"], other["wake"]) == (False, False)
+    assert (other["sound"], other["wake"]) == (False, True)

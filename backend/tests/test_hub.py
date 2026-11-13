@@ -177,7 +177,7 @@ def test_ping_and_bad_messages(client: TestClient, capsys: pytest.CaptureFixture
     with connect(client) as ws:
         ws.send_json({"type": "ping"})
         assert recv(ws) == {"type": "pong"}
-        for bad in ["{oops", '{"no_type": 1}', '{"type": "launch"}', '{"type": "wake"}']:
+        for bad in ["{oops", '{"no_type": 1}', '{"type": "launch"}']:
             ws.send_text(bad)
             assert recv(ws) == {"type": "error", "code": "bad_message"}
         hello(ws)  # a second hello is not a valid message on an open session
@@ -300,7 +300,7 @@ def wake_client(app_factory: Any, tmp_path: Path) -> Iterator[TestClient]:
         yield c
 
 
-@pytest.mark.parametrize("device", ["desktop", "unknown"])
+@pytest.mark.parametrize("device", ["desktop"])
 def test_wake_refused_without_wake_flag(wake_client: TestClient, device: str) -> None:
     with connect(wake_client, device) as ws:
         for msg in ({"type": "wake"}, {"type": "wake", "followup": True}):
