@@ -93,7 +93,7 @@ export class TurnClient {
     } catch {
       return; // denial already handled
     }
-    if (this.turn !== turn || this.phase !== 'thinking') return;
+    if (this.turn !== turn || (this.phase as TurnPhase) !== 'thinking') return;
     const rec = this.d.mic.stop();
     this.d.send(
       {
@@ -118,7 +118,7 @@ export class TurnClient {
     } catch {
       return;
     }
-    if (this.turn !== turn || this.phase !== 'thinking') return;
+    if (this.turn !== turn || (this.phase as TurnPhase) !== 'thinking') return;
     this.d.mic.close();
     this.d.send({ type: 'utterance', turn, format: 'pcm_s16le', rate: PCM_RATE, dur_ms: 0, tail_silence_ms: 0 });
   }

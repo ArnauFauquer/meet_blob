@@ -60,6 +60,10 @@ describe('AlertReader (alert tap row)', () => {
     expect(deps.beep).toHaveBeenCalledTimes(1);
     r.onPlaybackIdle(); // the beep ends
     expect(sent).toHaveLength(1);
+    r.read('t1');
+    r.onError({ type: 'error', code: 'not_ready' }); // models still loading
+    expect(deps.beep).toHaveBeenCalledTimes(2);
+    expect(sent.filter((m) => m.type === 'alert_ack')).toHaveLength(0);
   });
   it('audio that cannot be decoded: beep, no ack', async () => {
     const { r, sent, deps } = setup(false);

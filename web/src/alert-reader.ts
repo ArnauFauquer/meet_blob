@@ -50,9 +50,9 @@ export class AlertReader {
     return true;
   }
 
-  // The server refused the read (unknown key, a turn running) or failed.
+  // The server refused the read (unknown key, a turn running, models loading) or synthesis failed.
   onError(m: ErrorMsg): void {
-    if (this.key !== null && !this.playingAudio && m.code === 'bad_message') this.fail();
+    if (this.key !== null && !this.playingAudio && m.code !== 'busy') this.fail();
   }
 
   // Local playback became empty.

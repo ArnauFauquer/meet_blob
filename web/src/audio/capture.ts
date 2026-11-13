@@ -22,7 +22,7 @@ export class Capture implements Mic {
   onFrame: (pcm: Int16Array) => void = () => {};
 
   private readonly capMs: number;
-  private readonly silenceRms: number;
+  silenceRms: number; // from /device-config
 
   constructor(ctx: AudioContext, capMs: number, silenceRms: number) {
     this.ctx = ctx;
