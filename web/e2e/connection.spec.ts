@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { dbg, log, mockOnly, openBlob, recv, sent, waitFor, waitView } from './helpers';
+import { TOKEN, dbg, log, mockOnly, openBlob, recv, sent, waitFor, waitView } from './helpers';
 
 test('bad token: close 4401, fault shown, no retry', async ({ page }) => {
   await openBlob(page, 'e2e-badtoken', 'wrong-token');
@@ -10,6 +10,12 @@ test('bad token: close 4401, fault shown, no retry', async ({ page }) => {
   await page.waitForTimeout(4000); // longer than the first two backoff steps
   expect((await log(page)).filter((e) => e.dir === 'connect')).toHaveLength(1);
   expect(await dbg(page, 'view')).toBe('offline');
+});
+
+test('bad token: prompt for the token, store it, reload into idle', async ({ page }) => {
+  page.once('dialog', (d) => d.accept(TOKEN));
+  await openBlob(page, 'e2e-prompt', 'wrong-token');
+  await waitView(page, 'idle');
 });
 
 test('reconnects after the socket drops', async ({ page }) => {
