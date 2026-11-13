@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FollowUp, PLAYBACK_HANGOVER_MS, wakeAllowed, type GateInput } from './wake-gate';
+import { FollowUp, PLAYBACK_HANGOVER_MS, gateReason, wakeAllowed, type GateInput } from './wake-gate';
 
 const idle: GateInput = { enabled: true, phase: 'idle', conv: 'idle', playing: false, lastPlaybackEnd: null, followup: false, now: 10_000 };
 
@@ -22,6 +22,18 @@ describe('wakeAllowed', () => {
   });
   it('muted while a follow-up is due or its window is open', () => {
     expect(wakeAllowed({ ...idle, followup: true })).toBe(false);
+  });
+});
+
+describe('gateReason', () => {
+  it('names the rule that keeps the detector off', () => {
+    expect(gateReason(idle)).toBe('open');
+    expect(gateReason({ ...idle, enabled: false, followup: true })).toBe('off');
+    expect(gateReason({ ...idle, followup: true, phase: 'listening' })).toBe('followup');
+    expect(gateReason({ ...idle, phase: 'thinking', conv: 'thinking' })).toBe('turn');
+    expect(gateReason({ ...idle, conv: 'speaking' })).toBe('busy');
+    expect(gateReason({ ...idle, playing: true })).toBe('playing');
+    expect(gateReason({ ...idle, lastPlaybackEnd: idle.now - 100 })).toBe('hangover');
   });
 });
 

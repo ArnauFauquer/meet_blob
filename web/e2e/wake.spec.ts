@@ -33,4 +33,13 @@ test('wake word: "hey blob" sends wake, the turn listens, the VAD ends it, nothi
   expect(sent(l, 'tap')).toHaveLength(0);
   await waitFor(page, (l) => recv(l, 'turn_done').length > 0, 'turn_done');
   expect(await tracksStopped(page)).toBe(false); // the shared stream stays open for the wake word
+
+  // the wake log: the gate opened, the attempt's peak fired, the gate closed for the turn, the turn says how it started
+  const ev = (await waitFor(page, (l) => sent(l, 'client_event').some((e) => e.data?.kind === 'turn_start'), 'turn_start'))
+    .filter((e) => e.dir === 'send' && e.data?.type === 'client_event')
+    .map((e) => e.data!);
+  expect(ev).toContainEqual(expect.objectContaining({ kind: 'wake_gate', on: true, why: 'open' }));
+  expect(ev).toContainEqual(expect.objectContaining({ kind: 'wake_peak', fired: true }));
+  expect(ev).toContainEqual(expect.objectContaining({ kind: 'wake_gate', on: false, why: 'turn' }));
+  expect(ev).toContainEqual(expect.objectContaining({ kind: 'turn_start', turn: expect.any(Number), how: 'wake' }));
 });
