@@ -387,4 +387,8 @@ window.blobDebug = {
   get turnKind() {
     return turn.kind;
   },
+  // Screenshot script only: hold the current frame (a mid-morph capture).
+  freeze() {
+    renderer?.stop();
+  },
 };

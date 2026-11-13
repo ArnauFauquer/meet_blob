@@ -1,7 +1,7 @@
 // S4 alert flows. Protocol-visible, so they also run against a real backend
 // (BLOB_URL) when BLOB_ALERT_TOKEN is set; the synthesis-failure flow is mock-only.
 import { expect, test } from '@playwright/test';
-import { alertSource, dbg, external, log, mockOnly, needsAlerts, openBlob, recv, sent, shape, speak, tap, waitFor, waitView } from './helpers';
+import { type LogEntry, alertSource, dbg, external, log, mockOnly, needsAlerts, openBlob, recv, sent, shape, speak, tap, waitFor, waitView } from './helpers';
 
 const SHAPE = { sphere: 0, triangle: 1, square: 2 };
 let alerts: ReturnType<typeof alertSource>;
@@ -67,8 +67,9 @@ test('a tap reads the alert: alert_read, the WAV plays, alert_ack after playback
   let l = await waitFor(page, (l) => sent(l, 'alert_read').length > 0, 'alert_read sent');
   expect(sent(l, 'alert_read')[0].data).toEqual({ type: 'alert_read', key });
   expect(sent(l, 'tap')).toHaveLength(0);
-  l = await waitFor(page, (l) => recv(l, 'tts').some((e) => e.data?.alert === key), 'tts for the alert');
-  const ti = l.findIndex((e) => e.dir === 'recv' && e.data?.type === 'tts');
+  const ttsIndex = (l: LogEntry[]) => l.findIndex((e) => e.dir === 'recv' && e.data?.type === 'tts' && e.data?.alert === key);
+  l = await waitFor(page, (l) => ttsIndex(l) >= 0 && l[ttsIndex(l) + 1]?.data?.binary !== undefined, 'tts for the alert and its frame');
+  const ti = ttsIndex(l);
   expect(l[ti].data).toMatchObject({ alert: key, turn: null, final: true });
   expect(l[ti + 1].data!.binary).toBeGreaterThan(44);
   await expect.poll(() => dbg<number>(page, 'started'), { message: 'the WAV plays' }).toBeGreaterThan(startedBefore);
