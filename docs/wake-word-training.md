@@ -10,15 +10,20 @@ the page loads it, how well it does, how it was trained, and how to retrain it.
 *   `web/public/models/wake.json` picks the model:
 
     ```json
-    { "model": "hey_blob.onnx", "phrase": "hey blob", "threshold": 0.5 }
+    { "model": "hey_blob.onnx", "phrase": "hey blob", "threshold": 0.35, "verifier": "" }
     ```
 
 *   The pipeline is openWakeWord's: `melspectrogram.onnx` and `embedding_model.onnx` (shared,
     keep them) feed a wake model whose input is `[1, 16, 96]` (16 embeddings of 96 values, 1.28 s)
     and whose output is one score `[1, 1]`. Tensor names are read from the file, so they do not
     matter.
+*   `verifier` names an optional personal verifier (JSON, see "Personal verifier" below). When it
+    loads, it replaces the score whenever the base model reaches its `gate` (0.1). The diagnostics
+    view shows `verifier: true` once loaded, `false` if the file is missing or malformed (the base
+    model then works alone).
 *   `phrase` is shown in the diagnostics view only. `threshold` is the score that fires. Raise it
-    if there are false accepts, lower it (0.3 to 0.4) if there are misses.
+    if there are false accepts, lower it if there are misses. It was 0.5 until the tablet test of
+    2026-11-13: real attempts peaked between 0.14 and 0.77 and fired 3 times in 6.
 *   A device with `"wake": false` in `config/devices.json` loads none of this.
 *   The stock `hey_jarvis_v0.1.onnx` stays in the folder: the pipeline unit test uses it, and
     pointing `wake.json` back at it (`"phrase": "hey jarvis"`) is the fallback.
@@ -79,6 +84,44 @@ If misses are the problem, retrain with extra positives in the household's accen
 British and Spanish voices (`tools/wake-word/kokoro_clips.py`), or recordings of the household
 saying the phrase, added to `positive_train` before `--augment_clips`. Recordings of real voices
 stay outside the repository (`.gitignore` excludes `**/clips/`).
+
+## Personal verifier
+
+The base model is weak on the household's voices: on the tablet it fired 3 times in 6, and on
+Kokoro speech "hey blob" fires about 55 % of the time while "hey blog" reaches 0.4. Lowering the
+threshold alone lets "hey blog" in. The fix is openWakeWord's custom verifier: a logistic
+regression on the 16 x 96 features the wake model sees, trained on recordings of the household
+saying the phrase, on the tablet's own microphone. On Kokoro voices (31 different voices, which is
+harder than one household) it took held-out "hey blob" from about 55 % to 84 % and kept "hey bob"
+and "hey blog" at 5 %; the page computes the same scores as Python (0.982 / 0.982, 0.069 / 0.071).
+
+1.  Turn on `DEBUG_AUDIO_DIR` on the backend (home_lab `faukinator/blob/values.yaml`). The page
+    reads `debug_audio: true` from `/device-config` and sends `wake_clip` audio; the backend keeps
+    it in `<DEBUG_AUDIO_DIR>/wake/<label>/` (the newest `DEBUG_WAKE_KEEP`, 500, per label). The
+    file name ends with the peak score, `_p0420.wav`.
+2.  On the tablet, open the page with `?enroll=pos` (for example `https://<host>/?enroll=pos`;
+    tap once to unlock the audio). Say "hey blob" from where people usually talk, pause about two
+    seconds, repeat: 50 to 100 times, several people, near and far, TV on and off. The top line
+    counts the clips sent and shows each one's base score. No turn starts in this mode.
+3.  Open `?enroll=neg` and talk about anything else for a few minutes (and let the TV play):
+    those clips are the negatives. Phrases that sound close ("hey bob", "hey blog", "a blob")
+    are the most useful.
+4.  In normal use the page also sends every attempt the wake word heard (peak at or above 0.1)
+    as `wake/auto/`: real misses and false accepts. Listen to them and move each into `pos` or
+    `neg` before training.
+5.  Copy the folder from the pod (`kubectl -n blob cp <pod>:/data/debug-audio/wake ./wake`) to
+    `../blob-wakeword`, then:
+
+    ```
+    .venv/Scripts/python ../meet_blob/tools/wake-word/train_verifier.py --model output/hey_blob.onnx         --pos wake/pos --neg wake/neg --out hey_blob_verifier.json
+    ```
+
+    It prints the held-out recall and false accepts per clip, and the positives that never reach
+    the gate (the verifier cannot rescue those; record more, or pass a lower `--gate`).
+6.  Copy `hey_blob_verifier.json` to `web/public/models/`, set `"verifier": "hey_blob_verifier.json"`
+    in `wake.json`, add it to the models README, rebuild and deploy.
+7.  Turn `DEBUG_AUDIO_DIR` off again and delete the recordings in the pod and on the PC. The
+    verifier file holds averages of features, not audio.
 
 ## How it was trained
 

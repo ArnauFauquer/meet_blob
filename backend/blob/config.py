@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     # empty). Personal voice recordings: turn it off and delete the folder after debugging.
     debug_audio_dir: str = ""
     debug_audio_keep: int = Field(20, ge=1, le=500)
+    # Wake word clips (wake_clip) go to <DEBUG_AUDIO_DIR>/wake/<label>/, this many per label.
+    debug_wake_keep: int = Field(500, ge=1, le=5000)
 
     # Development switch: canned transcript and tone audio instead of the speech models.
     blob_fake_models: bool = False

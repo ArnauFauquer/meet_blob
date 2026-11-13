@@ -93,6 +93,15 @@ class Wake(BaseModel):
     followup: bool = False
 
 
+class WakeClip(BaseModel):
+    """Debug: wake word audio for retraining, saved only when DEBUG_AUDIO_DIR is set."""
+
+    type: Literal["wake_clip"] = "wake_clip"
+    label: Literal["pos", "neg", "auto"]
+    peak: float = Field(ge=0, le=1)
+    dur_ms: int = Field(gt=0)
+
+
 class AlertRead(BaseModel):
     type: Literal["alert_read"] = "alert_read"
     key: str
@@ -104,7 +113,7 @@ class AlertAck(BaseModel):
 
 
 ClientMessage = Annotated[
-    Hello | Tap | Utterance | Cancel | Ping | ClientEvent | Wake | AlertRead | AlertAck,
+    Hello | Tap | Utterance | Cancel | Ping | ClientEvent | Wake | WakeClip | AlertRead | AlertAck,
     Field(discriminator="type"),
 ]
 client_message: TypeAdapter[ClientMessage] = TypeAdapter(ClientMessage)
@@ -192,6 +201,7 @@ CLIENT_MESSAGES: tuple[type[BaseModel], ...] = (
     Ping,
     ClientEvent,
     Wake,
+    WakeClip,
     AlertRead,
     AlertAck,
 )

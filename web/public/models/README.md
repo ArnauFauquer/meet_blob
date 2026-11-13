@@ -11,7 +11,7 @@ downloads them.
 | `hey_blob.onnx` | **the wake word in use**: "hey blob" (16 embeddings to a score), trained by the author with openWakeWord's training code on 2026-11-13 (`docs/wake-word-training.md`) | this repository | the author's own model. Its training data (Piper LibriTTS-R voices, ACAV100M features, AudioSet, MIT impulse responses) has mixed licences, some non-commercial: keep it to private use like the release models |
 | `hey_jarvis_v0.1.onnx` | stock wake word "hey jarvis" (16 embeddings to a score); no longer loaded by the page, kept for the pipeline unit test and as a fallback | same release | **CC BY-NC-SA 4.0** (non-commercial, share-alike, attribution: David Scripka, openWakeWord) |
 | `silero_vad_v5.onnx` | Silero voice-activity detector v5 (512-sample frames at 16 kHz) | copied from `@ricky0123/vad-web@0.0.31` (`dist/silero_vad_v5.onnx`), originally [snakers4/silero-vad](https://github.com/snakers4/silero-vad) | **MIT** (silero-vad); vad-web is ISC |
-| `wake.json` | which wake model file to load, its phrase and the score threshold | this repository | same as the repository |
+| `wake.json` | which wake model file to load, its phrase, the score threshold and the optional personal verifier (`docs/wake-word-training.md`, "Personal verifier") | this repository | same as the repository |
 
 SHA-256 of the files as committed:
 

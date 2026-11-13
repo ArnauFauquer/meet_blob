@@ -17,16 +17,43 @@ export interface OwwModels {
   score(features: Float32Array): Promise<number>; // 16 x 96 -> score
 }
 
+// openWakeWord's custom verifier (train_custom_verifier: StandardScaler + logistic
+// regression on the 16 x 96 features), exported to JSON by
+// tools/wake-word/train_verifier.py. Trained on one household's voices and
+// microphone; it replaces the score whenever the base model reaches `gate`.
+export interface Verifier {
+  gate: number;
+  mean: number[]; // FEATURES * EMB each, row-major (oldest embedding first)
+  scale: number[];
+  coef: number[];
+  intercept: number;
+}
+
+export function isVerifier(v: unknown): v is Verifier {
+  const n = FEATURES * EMB;
+  const o = v as Partial<Verifier> | null;
+  const vec = (a: unknown) => Array.isArray(a) && a.length === n && a.every((x) => Number.isFinite(x));
+  return !!o && Number.isFinite(o.gate) && Number.isFinite(o.intercept) && vec(o.mean) && vec(o.scale) && vec(o.coef);
+}
+
+export function verify(v: Verifier, feats: Float32Array): number {
+  let z = v.intercept;
+  for (let i = 0; i < feats.length; i++) z += (v.coef[i] * (feats[i] - v.mean[i])) / v.scale[i];
+  return 1 / (1 + Math.exp(-z));
+}
+
 export class OwwPipeline {
   private readonly m: OwwModels;
+  private readonly verifier: Verifier | null;
   private raw = new Float32Array(CHUNK + MEL_CONTEXT);
   private pending = new Float32Array(CHUNK);
   private filled = 0;
   private mel = new Float32Array(MEL_WINDOW * MEL_BINS);
   private feats = new Float32Array(FEATURES * EMB);
 
-  constructor(models: OwwModels) {
+  constructor(models: OwwModels, verifier: Verifier | null = null) {
     this.m = models;
+    this.verifier = verifier;
     this.reset();
   }
 
@@ -63,7 +90,8 @@ export class OwwPipeline {
     const n = Math.floor(frames.length / MEL_BINS);
     shiftIn(this.mel, frames.map((v) => v / 10 + 2), n * MEL_BINS);
     shiftIn(this.feats, await this.m.embed(this.mel), EMB);
-    return this.m.score(this.feats);
+    const score = await this.m.score(this.feats);
+    return this.verifier && score >= this.verifier.gate ? verify(this.verifier, this.feats) : score;
   }
 }
 

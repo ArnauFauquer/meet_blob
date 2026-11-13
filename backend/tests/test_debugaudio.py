@@ -7,7 +7,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from blob.debugaudio import AudioDump
-from tests.conftest import wait_ready
+from tests.conftest import TOKEN, wait_ready
 from tests.test_hub import SPEECH, connect, tap, until, utterance
 
 
@@ -46,3 +46,47 @@ def test_hub_saves_the_utterance_only_when_on(app_factory: Any, tmp_path: Path) 
             utterance(ws, tap(ws), SPEECH)
             until(ws, "turn_done")
     assert len(list(tmp_path.rglob("*.wav"))) == 1
+
+
+def test_wake_clips_go_to_their_label_folder(tmp_path: Path) -> None:
+    t = iter(x / 10 for x in range(17_000_000_000, 17_000_000_100))
+    dump = AudioDump(str(tmp_path), keep=1, wake_keep=2, wall=lambda: next(t))
+    for peak in (0.1, 0.25, 0.5):
+        dump.save_wake("tablet", "pos", peak, SPEECH)
+    dump.save_wake("tablet", "../auto", 0.142, SPEECH)
+    pos = sorted(p.name for p in (tmp_path / "wake" / "pos").glob("*.wav"))
+    assert len(pos) == 2
+    assert pos[0].endswith("_tablet_p0250.wav") and pos[1].endswith("_tablet_p0500.wav")
+    [auto] = (tmp_path / "wake" / "___auto").glob("*.wav")  # the label cannot leave the folder
+    assert auto.name.endswith("_tablet_p0142.wav")
+
+
+def _clip(ws: Any, label: str, pcm: bytes) -> None:
+    ws.send_json({"type": "wake_clip", "label": label, "peak": 0.42, "dur_ms": len(pcm) // 32})
+    ws.send_bytes(pcm)
+
+
+def test_hub_saves_wake_clips_only_when_on(app_factory: Any, tmp_path: Path) -> None:
+    folder = tmp_path / "dbg"
+    with TestClient(app_factory(debug_audio_dir=str(folder))) as c:
+        wait_ready(c)
+        cfg = c.get("/device-config?device=tablet", headers={"Authorization": f"Bearer {TOKEN}"})
+        assert cfg.json()["debug_audio"] is True
+        with connect(c, device="tablet") as ws:
+            _clip(ws, "pos", SPEECH)
+            _clip(ws, "auto", SPEECH)
+            ws.send_json({"type": "ping"})
+            until(ws, "pong")
+    [f] = (folder / "wake" / "pos").glob("*.wav")
+    assert f.name.endswith("_tablet_p0420.wav")
+    assert len(list((folder / "wake" / "auto").glob("*.wav"))) == 1
+
+    with TestClient(app_factory()) as c:  # off: the frame is consumed, nothing written, no error
+        wait_ready(c)
+        cfg = c.get("/device-config?device=tablet", headers={"Authorization": f"Bearer {TOKEN}"})
+        assert cfg.json()["debug_audio"] is False
+        with connect(c, device="tablet") as ws:
+            _clip(ws, "pos", SPEECH)
+            ws.send_json({"type": "ping"})
+            assert [m["type"] for m in until(ws, "pong")][-1] == "pong"
+    assert len(list(tmp_path.rglob("*.wav"))) == 2

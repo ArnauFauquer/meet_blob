@@ -49,5 +49,6 @@ def test_device_config(tmp_path: Path, app_factory: Any) -> None:
         "followup_listen_s": 6.0,
         "listen_no_speech_s": 8.0,
         "silence_rms": 0.01,
+        "debug_audio": False,
     }
     assert (other["sound"], other["wake"]) == (False, True)

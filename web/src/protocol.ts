@@ -61,6 +61,8 @@ export interface PingMsg { type: 'ping' }
 export interface ClientEventMsg { type: 'client_event'; kind: string; [extra: string]: unknown }
 // S3 and S4 messages.
 export interface WakeMsg { type: 'wake'; followup: boolean }
+// Debug: wake word audio for retraining (followed by one binary frame of 16 kHz s16le PCM).
+export interface WakeClipMsg { type: 'wake_clip'; label: 'pos' | 'neg' | 'auto'; peak: number; dur_ms: number }
 export interface AlertReadMsg { type: 'alert_read'; key: string }
 export interface AlertAckMsg { type: 'alert_ack'; key: string }
 
@@ -72,6 +74,7 @@ export type ClientMessage =
   | PingMsg
   | ClientEventMsg
   | WakeMsg
+  | WakeClipMsg
   | AlertReadMsg
   | AlertAckMsg;
 
@@ -107,7 +110,7 @@ export type ServerMessage =
   | PongMsg;
 
 export const CLIENT_TYPES = [
-  'hello', 'tap', 'utterance', 'cancel', 'ping', 'client_event', 'wake', 'alert_read', 'alert_ack',
+  'hello', 'tap', 'utterance', 'cancel', 'ping', 'client_event', 'wake', 'wake_clip', 'alert_read', 'alert_ack',
 ] as const satisfies readonly ClientMessage['type'][];
 export const SERVER_TYPES = [
   'hello_ok', 'snapshot', 'state', 'tts', 'turn_done', 'error', 'pong',

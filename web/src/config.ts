@@ -14,6 +14,7 @@ export interface DeviceConfig {
   followup_listen_s: number;
   listen_no_speech_s: number;
   silence_rms: number;
+  debug_audio: boolean; // DEBUG_AUDIO_DIR is set on the backend: wake_clip audio is kept
 }
 
 export const DEFAULT_DEVICE = 'desktop';
@@ -24,6 +25,7 @@ export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
   followup_listen_s: 6,
   listen_no_speech_s: 8,
   silence_rms: SILENCE_RMS,
+  debug_audio: false,
 };
 
 export function wsUrl(loc: Pick<Location, 'protocol' | 'host'> = location): string {

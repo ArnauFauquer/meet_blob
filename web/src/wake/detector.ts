@@ -1,14 +1,16 @@
 import type { FromWorker, ToWorker } from './messages';
 
-// Wake word settings: which model file in /models/ and the phrase it was
-// trained for. Read from /models/wake.json so a custom model ("hey blob")
-// drops in without a code change (docs/wake-word-training.md).
+// Wake word settings: which model file in /models/, the phrase it was trained
+// for, and the optional custom verifier (trained on this household's voices).
+// Read from /models/wake.json so a new model drops in without a code change
+// (docs/wake-word-training.md).
 export interface WakeConfig {
   model: string;
   phrase: string;
   threshold: number;
+  verifier: string; // JSON file in /models/, '' for none
 }
-export const DEFAULT_WAKE: WakeConfig = { model: 'hey_blob.onnx', phrase: 'hey blob', threshold: 0.5 };
+export const DEFAULT_WAKE: WakeConfig = { model: 'hey_blob.onnx', phrase: 'hey blob', threshold: 0.35, verifier: '' };
 export const MODELS_BASE = '/models/';
 
 export async function loadWakeConfig(): Promise<WakeConfig> {
@@ -22,7 +24,7 @@ export async function loadWakeConfig(): Promise<WakeConfig> {
 }
 
 export interface DetectorEvents {
-  onReady(wake: boolean, vad: boolean): void;
+  onReady(wake: boolean, vad: boolean, verifier: boolean): void;
   onScore(score: number): void;
   onVad(p: number): void;
   onError(what: 'wake' | 'vad', message: string): void;
@@ -37,13 +39,13 @@ export class Detector {
     this.worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = (e: MessageEvent<FromWorker>) => {
       const m = e.data;
-      if (m.type === 'ready') ev.onReady(m.wake, m.vad);
+      if (m.type === 'ready') ev.onReady(m.wake, m.vad, m.verifier);
       else if (m.type === 'score') ev.onScore(m.score);
       else if (m.type === 'vad') ev.onVad(m.p);
       else ev.onError(m.what, m.message);
     };
     this.worker.onerror = (e) => ev.onError('wake', e.message || 'worker failed');
-    this.post({ type: 'init', base: new URL(MODELS_BASE, location.href).href, wakeModel: cfg.model });
+    this.post({ type: 'init', base: new URL(MODELS_BASE, location.href).href, wakeModel: cfg.model, verifier: cfg.verifier });
   }
 
   push(pcm: Int16Array, wake: boolean, vad: boolean): void {

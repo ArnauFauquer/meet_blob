@@ -7,7 +7,8 @@
 // Any other name is a normal turn. Device flags (GET /device-config): a name
 // starting with "hf-" has wake=true, a name containing "sound" has sound=true.
 // A name containing "followup" gets tts.followup=true on a turn not started by
-// a follow-up. Alerts (S4): POST/GET/DELETE /alerts with MOCK_ALERT_TOKEN; an
+// a follow-up. A name containing "debug" gets debug_audio=true (wake_clip frames
+// are logged as mock_wake_clip and dropped). Alerts (S4): POST/GET/DELETE /alerts with MOCK_ALERT_TOKEN; an
 // alert_read of a key starting with "ttsfail" answers error{bad_message} (synthesis failure).
 // Run: node e2e/mock-backend.ts (PORT, MOCK_TOKEN, MOCK_ALERT_TOKEN, MOCK_STATIC).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -52,6 +53,7 @@ interface Conn {
   hello: boolean;
   device: string;
   pendingUtterance: { turn: number; dur_ms: number } | null;
+  pendingClip: { label: string; peak: number; dur_ms: number } | null;
 }
 const wakeDevice = (d: string) => d.startsWith('hf-');
 interface Turn {
@@ -134,6 +136,11 @@ function startTurn(c: Conn, followup: boolean) {
 }
 
 function onMessage(c: Conn, data: RawData, isBinary: boolean) {
+  if (isBinary && c.pendingClip) {
+    console.log(JSON.stringify({ kind: 'mock_wake_clip', ...c.pendingClip, bytes: (data as Buffer).length }));
+    c.pendingClip = null;
+    return;
+  }
   if (isBinary) {
     const u = c.pendingUtterance;
     c.pendingUtterance = null;
@@ -170,6 +177,9 @@ function onMessage(c: Conn, data: RawData, isBinary: boolean) {
   switch (m.type) {
     case 'ping':
       return send(c, { type: 'pong' });
+    case 'wake_clip':
+      c.pendingClip = { label: String(m.label), peak: Number(m.peak), dur_ms: Number(m.dur_ms) };
+      return;
     case 'client_event':
       return console.log(JSON.stringify({ ...m, kind: 'client_event', event: m.kind }));
     case 'wake':
@@ -241,6 +251,7 @@ async function serve(req: IncomingMessage, res: ServerResponse) {
         followup_listen_s: 6,
         listen_no_speech_s: 8,
         silence_rms: 0.01,
+        debug_audio: device.includes('debug'),
       }),
     );
   }
@@ -308,7 +319,7 @@ async function alertsApi(req: IncomingMessage, res: ServerResponse, url: URL) {
 const server = createServer((req, res) => void serve(req, res));
 const wss = new WebSocketServer({ server, path: '/ws' });
 wss.on('connection', (ws) => {
-  const c: Conn = { ws, hello: false, device: '', pendingUtterance: null };
+  const c: Conn = { ws, hello: false, device: '', pendingUtterance: null, pendingClip: null };
   conns.add(c);
   ws.on('message', (d, isBinary) => onMessage(c, d, isBinary));
   ws.on('close', () => {
