@@ -13,6 +13,7 @@ import httpx
 import numpy as np
 import uvicorn
 from fastapi import Depends, FastAPI, Request, WebSocket
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from numpy.typing import NDArray
@@ -143,6 +144,14 @@ def create_app(
             st.db.close()
 
     app = FastAPI(title="Blob", lifespan=lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def _invalid(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # Without this, a NaN in the body makes FastAPI fail while echoing it back (500, not 422).
+        return JSONResponse(
+            {"detail": [{"loc": e["loc"], "msg": e["msg"]} for e in exc.errors()]}, status_code=422
+        )
+
     app.state.settings = settings
     app.state.devices = devices
     app.state.ready = False

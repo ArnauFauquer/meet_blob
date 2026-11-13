@@ -266,3 +266,10 @@ def test_get_lists_every_state(api: TestClient) -> None:
         {"key": "k", "state": "acked", "fire_at": None},
         {"key": "p", "state": "pending", "fire_at": NOW + 60},
     ]
+
+
+@pytest.mark.parametrize("field", ["in_s", "fire_at"])
+def test_nan_is_422_not_500(api: TestClient, field: str) -> None:
+    body = f'{{"key": "k", "source": "s", "text": "t", "{field}": NaN}}'
+    r = api.post("/alerts", content=body, headers={**AUTH, "Content-Type": "application/json"})
+    assert r.status_code == 422
