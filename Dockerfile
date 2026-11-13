@@ -20,7 +20,7 @@ RUN npm run build
 # kokoro-onnx and the faster-whisper VAD use the CPU onnxruntime. Switching to onnxruntime-gpu
 # needs cuDNN 9: use the 12.9.1-cudnn-runtime-ubuntu24.04 tag then.
 # kube1's driver (580) supports CUDA <= 13.0.
-FROM nvidia/cuda:12.9.1-base-ubuntu24.04
+FROM nvidia/cuda:12.9.2-base-ubuntu24.04
 
 # One line per system package. espeak-ng is not needed: kokoro-onnx bundles it via espeakng-loader.
 # tzdata: the chart sets TZ (quiet hours are local time).
