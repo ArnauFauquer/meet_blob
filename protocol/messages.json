@@ -158,6 +158,23 @@
       "response": "{device, sound, wake, quiet_hours, followup_listen_s, listen_no_speech_s, silence_rms}"
     },
     "GET /healthz": "always 200, body {alive, ready, hermes_reachable}",
-    "GET /readyz": "503 until models loaded, then 200"
-  }
+    "GET /readyz": "503 until models loaded, then 200",
+    "POST /alerts": {
+      "auth": "Authorization: Bearer <ALERT_TOKEN>",
+      "body": "{key, source, text, urgency?, lang?, fire_at?|in_s?, ttl_s?}",
+      "response": "201 new / 200 update {key, state, fire_at}; 422 invalid; 429 over 20 active"
+    },
+    "GET /alerts": {
+      "auth": "ALERT_TOKEN",
+      "response": "array of {key, state, fire_at}"
+    },
+    "DELETE /alerts/{key}": {
+      "auth": "ALERT_TOKEN",
+      "response": "204 (idempotent)"
+    }
+  },
+  "notes": [
+    "alert_read: a failed synthesis or an unknown key answers error{bad_message}; a tap before the models load answers error{not_ready}",
+    "tts.followup is set for every device; the page must ignore it on devices with wake=false"
+  ]
 }
