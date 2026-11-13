@@ -1,7 +1,8 @@
 """A fake Hermes /v1/chat/completions server that records what it receives.
 
 In tests: make_app(...) with httpx.ASGITransport. As a server:
-    uv run python tests/fakes/fake_hermes.py --port 8642 [--mode ok|error|markdown] [--delay 0]
+    uv run python tests/fakes/fake_hermes.py --port 8642 [--delay 0] \
+        [--mode ok|error|markdown|empty|question]
 GET /requests returns what was recorded; DELETE /requests clears it.
 """
 
@@ -23,7 +24,7 @@ MARKDOWN_REPLY = (
 
 @dataclass
 class FakeHermes:
-    mode: str = "ok"  # ok | error | markdown | empty
+    mode: str = "ok"  # ok | error | markdown | empty | question
     delay: float = 0.0
     status: int = 500
     requests: list[dict[str, Any]] = field(default_factory=list)
@@ -33,6 +34,8 @@ class FakeHermes:
             return MARKDOWN_REPLY
         if self.mode == "empty":
             return ""
+        if self.mode == "question":
+            return f"Has dicho: {user_text}. ¿Quieres algo más?"
         return f"Has dicho: {user_text}. Es una respuesta de prueba."
 
 
@@ -73,7 +76,7 @@ if __name__ == "__main__":
 
     p = argparse.ArgumentParser()
     p.add_argument("--port", type=int, default=8642)
-    p.add_argument("--mode", default="ok", choices=["ok", "error", "markdown", "empty"])
+    p.add_argument("--mode", default="ok", choices=["ok", "error", "markdown", "empty", "question"])
     p.add_argument("--delay", type=float, default=0.0)
     a = p.parse_args()
     uvicorn.run(make_app(FakeHermes(mode=a.mode, delay=a.delay)), host="127.0.0.1", port=a.port)

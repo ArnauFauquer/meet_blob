@@ -77,3 +77,9 @@ Where the time goes (removal tests, idle): lobes about 20 ms for three of them, 
 - **Speaking** pulses with the level through the lava glow (up to +45 % at full level) and the swells; the mirror itself does not brighten, so the pulse is moderate.
 - The thin-film iridescence is barely visible: on purpose, but it adds little.
 - **Not verified:** real tablet GPU frame time, colour on a real display, and how the motion feels at full frame rate. SwiftShader draws about 8 to 10 frames per second here, so I judged motion only from the contact sheets.
+
+## After the merge with main (S3/S4)
+
+- **Alerts.** Alerts use the same shading, with a lava colour from `ALERT_LAVA`. Their flat faces get stronger flowing ripples in the reflection (`faceted`), so they do not mirror one flat colour.
+- **Cost.** The merged shader costs 1.92x the original at idle in SwiftShader: 1.44x from this shading on top of main's new `map()`, which already costs about 1.33x. Details and a suggested fix are in `docs/coordination/reports/look.md`.
+- **Load.** Compile, link and first draw take 277 ms: no load-time stall.

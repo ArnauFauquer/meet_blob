@@ -31,7 +31,7 @@ uniform float uGlow;
 uniform float uBright;
 uniform float uFlash;   // short brightness flash (busy)
 uniform float uRadius;
-// S4: shape morph. Ids: 0 sphere; triangle and square come with alerts.
+// Shape morph. Ids (SHAPE in tables.ts): 0 sphere, 1 triangle, 2 square.
 uniform float uShapeA;
 uniform float uShapeB;
 uniform float uMix;
@@ -89,14 +89,48 @@ float sphereShape(vec3 p) {
   return d;
 }
 
-float shape(vec3 p, float id) {
-  return sphereShape(p); // S4: triangle and square distance functions by id
+// Alert shapes (S4). Rounded triangular prism (timer) and rounded box (other
+// sources), facing the camera with a slow sway so the flat faces catch the
+// light. They pulse with the breathing radius.
+float sdTriPrism(vec3 p, vec2 h) {
+  vec3 q = abs(p);
+  return max(q.z - h.y, max(q.x * 0.866025 + p.y * 0.5, -p.y) - h.x * 0.5);
+}
+
+float sdRoundBox(vec3 p, vec3 b, float r) {
+  vec3 q = abs(p) - b + r;
+  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
+}
+
+// Both alert shapes at once: (triangle, square). They share the transform and the shimmer.
+vec2 alertShapes(vec3 p) {
+  float s = radius() / uRadius;
+  p /= s;
+  float a = 0.35 * sin(uFlow * 0.6);
+  p.xz = mat2(cos(a), -sin(a), sin(a), cos(a)) * p.xz;
+  p.yz = mat2(0.98, -0.2, 0.2, 0.98) * p.yz;
+  vec2 d = vec2(sdTriPrism(p + vec3(0.0, 0.15, 0.0), vec2(0.6, 0.2)) - 0.12,
+                sdRoundBox(p, vec3(0.6, 0.6, 0.32), 0.14));
+  d += (noise(p * 2.0 + vec3(0.0, uFlow * 0.6, 0.0)) - 0.5) * 0.03; // liquid shimmer
+  return d * s;
+}
+
+// Shape ids (SHAPE in tables.ts): 0 sphere, 1 triangle, 2 square.
+float pickShape(float id, float sphere, vec2 alerts) {
+  return id < 0.5 ? sphere : (id < 1.5 ? alerts.x : alerts.y);
 }
 
 float map(vec3 p) {
-  float a = shape(p, uShapeA);
-  if (uMix < 0.001) return a;
-  return mix(a, shape(p, uShapeB), uMix); // S4: march step shortened to about 0.7 while morphing
+  bool morph = uMix > 0.001;
+  // Each distance function appears once here (not once per shape slot), so the
+  // compiled shader stays small: software GL stalls the page while it compiles.
+  float sphere = (uShapeA < 0.5 || (morph && uShapeB < 0.5)) ? sphereShape(p) : 0.0;
+  vec2 alerts = (uShapeA > 0.5 || (morph && uShapeB > 0.5)) ? alertShapes(p) : vec2(0.0);
+  float a = pickShape(uShapeA, sphere, alerts);
+  if (!morph) return a;
+  // A mix of two distance fields is not a true distance: scaling it by 0.875
+  // turns the usual 0.8 march step into about 0.7 while morphing.
+  return mix(a, pickShape(uShapeB, sphere, alerts), uMix) * 0.875;
 }
 
 vec3 normalAt(vec3 p) {
@@ -161,7 +195,6 @@ vec3 env(vec3 d) {
   float cards = softbox(d, CARD1_A, CARD1_U, CARD1_V, vec2(0.13, 0.9), 0.12);
   cards = max(cards, softbox(d, CARD2_A, CARD2_U, CARD2_V, vec2(0.2, 0.9), 0.15));
   sky *= 1.0 - 0.92 * cards;
-  // Floor: near black, a dim pool of gel light further down.
   // Floor: dark under the horizon, then a pool of gel light bouncing up, so
   // the lower half of the blob still shows its volume.
   vec3 floorC = gel * (0.008 + 0.13 * smoothstep(-0.3, -0.95, d.y)) + 0.001;
@@ -199,7 +232,10 @@ vec3 reflection(vec3 rd, vec3 n, vec3 p) {
   const vec3 k2 = vec3(-7.0, 8.0, 5.0);
   vec3 g = k1 * cos(dot(p, k1) - uFlow * 2.1) + k2 * cos(dot(p, k2) + uFlow * 1.7);
   g -= n * dot(g, n);
-  vec3 nb = normalize(n + t * s - g * (0.006 + uLevel * 0.004));
+  // Alert shapes have flat faces that would mirror one flat colour: stronger
+  // ripples keep them liquid.
+  float faceted = smoothstep(0.5, 1.0, mix(uShapeA, uShapeB, uMix));
+  vec3 nb = normalize(n + t * s * (1.0 + faceted) - g * (0.006 + uLevel * 0.004 + 0.008 * faceted));
   return env(reflect(rd, nb));
 }
 

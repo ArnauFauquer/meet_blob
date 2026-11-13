@@ -11,15 +11,17 @@ import {
 } from 'three';
 import fragmentShader from './blob.frag?raw';
 import vertexShader from './blob.vert?raw';
-import { LOBE_COUNT, lobes, lookFor, type Look } from './tables';
+import { LOBE_COUNT, SHAPE, alertLook, alertShape, lobes, lookFor, type Look } from './tables';
+import { morphMix, stepMorph, type Morph } from './morph';
+import type { AlertItem } from '../protocol';
 import type { View } from '../state';
 
 export const RENDER_SCALE = 0.75;
-const CALM_FRAME_MS = 1000 / 30; // idle (and error/offline) is capped at 30 fps
+const CALM_FRAME_MS = 1000 / 30; // idle (and error, offline, alert) is capped at 30 fps
 const EASE_S = 0.6; // time constant of the state crossfade
-// Quality tiers (QUALITY define in blob.frag): 2 full, 1 fewer march steps and
-// reflection taps, 0 minimal. The page starts at 2 and steps down, never up,
-// when the moving average of the frame interval stays above SLOW_MS.
+// Quality tiers (QUALITY define in blob.frag): 2 full, 1 fewer march steps,
+// lobes and lava samples, 0 minimal. The page starts at 2 and steps down,
+// never up, when the moving average of the frame interval stays above SLOW_MS.
 export const MAX_QUALITY = 2;
 const SLOW_MS = 50; // under 20 fps
 const SLOW_FOR_S = 4;
@@ -27,6 +29,12 @@ const SLOW_FOR_S = 4;
 export interface FrameInput {
   view: View;
   level: number; // mic level while listening, playback level while speaking
+  alert?: Pick<AlertItem, 'source' | 'urgency'> | null; // the top alert, drawn when view is 'alert'
+}
+
+function targetOf(i: FrameInput): { look: Look; shape: number } {
+  if (i.view === 'alert' && i.alert) return { look: alertLook(i.alert.urgency), shape: alertShape(i.alert.source) };
+  return { look: lookFor(i.view === 'alert' ? 'idle' : i.view), shape: SHAPE.sphere };
 }
 
 // One fullscreen quad with the blob shader. The caller gives the view and the
@@ -41,6 +49,7 @@ export class BlobRenderer {
   private readonly camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private readonly material: RawShaderMaterial;
   private readonly cur: Look;
+  readonly morph: Morph;
   private readonly input: () => FrameInput;
   private last = 0;
   private lastDraw = 0;
@@ -48,15 +57,17 @@ export class BlobRenderer {
   private flashT = 0;
   private raf = 0;
   quality = MAX_QUALITY;
-  dim = 1; // night dimming, 0..1, multiplies every state's brightness (uBright)
   autoQuality = true;
+  dim = 1; // night dimming, 0..1, multiplies every state's brightness (uBright)
   private avgMs = 0;
   private slowS = 0;
 
   constructor(canvas: HTMLCanvasElement, input: () => FrameInput, onLost: (lost: boolean) => void) {
     this.canvas = canvas;
     this.input = input;
-    this.cur = structuredClone(lookFor(input().view));
+    const first = targetOf(input());
+    this.cur = structuredClone(first.look);
+    this.morph = { a: first.shape, b: first.shape, t: 0 };
     this.renderer = new WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'low-power' });
     this.material = new RawShaderMaterial({
       glslVersion: GLSL3,
@@ -78,8 +89,8 @@ export class BlobRenderer {
         uBright: { value: 0 },
         uFlash: { value: 0 },
         uRadius: { value: 0.78 },
-        uShapeA: { value: 0 },
-        uShapeB: { value: 0 },
+        uShapeA: { value: first.shape },
+        uShapeB: { value: first.shape },
         uMix: { value: 0 },
         uLobes: { value: new Float32Array(LOBE_COUNT * 4) },
       },
@@ -138,7 +149,9 @@ export class BlobRenderer {
   // zero in `view`'s look, so frames are reproducible.
   freeze(view: View): void {
     this.stop();
-    Object.assign(this.cur, structuredClone(lookFor(view)));
+    const { look, shape } = targetOf({ view, level: 0 });
+    Object.assign(this.cur, structuredClone(look));
+    Object.assign(this.morph, { a: shape, b: shape, t: 0 });
     const u = this.material.uniforms;
     u.uFlow.value = 0;
     u.uPhase.value = 0;
@@ -148,21 +161,22 @@ export class BlobRenderer {
 
   // Advances the frozen clock by `dtS` with the given input; draws when asked.
   step(dtS: number, input: FrameInput, draw: boolean): void {
-    this.advance(dtS, input.view, input.level);
+    this.advance(dtS, input);
     if (draw) this.renderer.render(this.scene, this.camera);
   }
 
   private frame(now: number): void {
     if (this.lost) return;
-    const { view, level } = this.input();
-    const calm = view === 'idle' || view === 'error' || view === 'offline';
+    const fi = this.input();
+    const { view } = fi;
+    const calm = view === 'idle' || view === 'error' || view === 'offline' || view === 'alert';
     if (calm && now - this.lastDraw < CALM_FRAME_MS - 2) return;
     this.lastDraw = now;
     const dt = Math.min(0.1, this.last ? (now - this.last) / 1000 : 0);
     this.last = now;
     this.frameMs = dt * 1000;
     this.adaptQuality(dt);
-    this.advance(dt, view, level);
+    this.advance(dt, fi);
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -178,8 +192,10 @@ export class BlobRenderer {
     }
   }
 
-  private advance(dt: number, view: View, level: number): void {
-    const target = lookFor(view);
+  private advance(dt: number, fi: FrameInput): void {
+    const { level } = fi;
+    const { look: target, shape } = targetOf(fi);
+    stepMorph(this.morph, shape, dt);
     const k = 1 - Math.exp(-dt / EASE_S);
     const c = this.cur;
     for (let i = 0; i < 3; i++) {
@@ -206,6 +222,9 @@ export class BlobRenderer {
     u.uGlow.value = c.glow;
     u.uBright.value = c.bright * this.dim;
     u.uFlash.value = this.flashT;
+    u.uShapeA.value = this.morph.a;
+    u.uShapeB.value = this.morph.b;
+    u.uMix.value = morphMix(this.morph);
     lobes(u.uFlow.value as number, c.amp, u.uLobes.value as Float32Array);
   }
 }

@@ -13,10 +13,11 @@ export class Playback {
   private cancelled = false;
   private gen = 0; // bumped by stopAll so a decode that finishes late is dropped
   private decoding = 0;
-  private beepBytes: Promise<ArrayBuffer | null> | null = null;
+  private readonly files = new Map<string, Promise<ArrayBuffer | null>>();
   private readonly beepUrl: string;
   onIdle: () => void = () => {};
   started = 0; // sources started, for the diagnostics and the e2e tests
+  effects = 0; // effect sounds started (e2e: the chime plays once)
 
   constructor(ctx: BaseAudioContext, beepUrl = '/beep.wav') {
     this.ctx = ctx;
@@ -55,11 +56,37 @@ export class Playback {
 
   // The local beep, played when speech output fails. It is not tied to a turn.
   async beep(): Promise<boolean> {
-    this.beepBytes ??= fetch(this.beepUrl)
-      .then((r) => (r.ok ? r.arrayBuffer() : null))
-      .catch(() => null);
-    const bytes = await this.beepBytes;
+    const bytes = await this.file(this.beepUrl);
     return bytes ? this.decodeAndSchedule(bytes) : false;
+  }
+
+  // A short sound outside any turn (the alert chime, the beep for an alert that
+  // cannot be read). It does not count as `playing` and stopAll does not stop it.
+  async effect(url: string): Promise<boolean> {
+    const bytes = await this.file(url);
+    if (!bytes) return false;
+    try {
+      const audio = await this.ctx.decodeAudioData(bytes.slice(0));
+      const src = this.ctx.createBufferSource();
+      src.buffer = audio;
+      src.connect(this.ctx.destination);
+      src.start();
+      this.effects += 1;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private file(url: string): Promise<ArrayBuffer | null> {
+    let f = this.files.get(url);
+    if (!f) {
+      f = fetch(url)
+        .then((r) => (r.ok ? r.arrayBuffer() : null))
+        .catch(() => null);
+      this.files.set(url, f);
+    }
+    return f;
   }
 
   stopAll(): void {

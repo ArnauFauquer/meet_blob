@@ -1,10 +1,10 @@
-// Renders the five states through real flows against the mock backend and
-// writes docs/screenshots/<state>-<w>x<h>.png, plus the PWA icons.
+// Renders the five states and the alert shapes through real flows against the
+// mock backend and writes docs/screenshots/<name>-<w>x<h>.png, plus the PWA icons.
 // Run: npm run screenshots (SwiftShader software GL: slow, about a minute).
 import { expect, test, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dbg, openBlob, tap, waitView } from './helpers';
+import { alertSource, dbg, openBlob, shape, tap, waitView } from './helpers';
 
 const OUT = fileURLToPath(new URL('../../docs/screenshots/', import.meta.url));
 const ICONS = fileURLToPath(new URL('../public/icons/', import.meta.url));
@@ -62,5 +62,35 @@ test('PWA icons from the idle blob', async ({ page }) => {
   // Crop to the blob so it fills most of the icon, then scale.
   for (const size of [192, 512]) {
     execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', src, '-vf', `crop=380:380,scale=${size}:${size}:flags=lanczos`, `${ICONS}icon-${size}.png`]);
+  }
+});
+
+test('alert shapes and a morph at 1280x800', async ({ page, request }) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const alerts = alertSource(request);
+  const settled = (id: number) =>
+    expect.poll(async () => { const s = await shape(page); return s?.a === id && s.mix === 0; }, { timeout: 20_000 }).toBe(true);
+  try {
+    await openBlob(page, 'e2e-shots');
+    await waitView(page, 'idle');
+    const timer = await alerts.post('timer', { source: 'timer', urgency: 'info', text: 'Timer.' });
+    await settled(1);
+    await shot(page, 'alert', 'alert-timer-info-1280x800', 3000);
+    await alerts.post('timer', { source: 'timer', urgency: 'urgent', text: 'Timer, urgent.' }, timer);
+    await shot(page, 'alert', 'alert-timer-urgent-1280x800', 3000);
+    await alerts.post('calendar', { source: 'calendar', urgency: 'info', text: 'Calendar.' });
+    await alerts.del(timer); // the calendar alert is now on top: triangle to square
+    await expect.poll(async () => { const s = await shape(page); return !!s && s.b === 2 && s.mix > 0.3 && s.mix < 0.7; }, { timeout: 10_000, intervals: [20] }).toBe(true);
+    await page.evaluate(() => (window as unknown as { blobDebug: { freeze(): void } }).blobDebug.freeze());
+    const mid = await shape(page);
+    await page.screenshot({ path: `${OUT}alert-morph-1280x800.png` });
+    console.log(`morph frame: uMix=${mid?.mix.toFixed(2)} shapes ${mid?.a} -> ${mid?.b}`);
+    await page.goto('about:blank');
+    await openBlob(page, 'e2e-shots');
+    await settled(2);
+    await shot(page, 'alert', 'alert-calendar-info-1280x800', 3000);
+  } finally {
+    await alerts.cleanup();
   }
 });

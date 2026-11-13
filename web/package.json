@@ -14,6 +14,8 @@
     "screenshots": "vite build && SCREENSHOTS=1 playwright test e2e/screenshots.spec.ts e2e/motion.spec.ts"
   },
   "dependencies": {
+    "@ricky0123/vad-web": "^0.0.31",
+    "onnxruntime-web": "^1.31.1",
     "three": "^0.187.0"
   },
   "devDependencies": {

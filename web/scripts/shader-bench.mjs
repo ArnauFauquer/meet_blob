@@ -20,7 +20,11 @@ const res = await p.evaluate(async (specs) => {
   const buf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const compileMs = {};
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   const progs = specs.map((s) => {
+    const t0 = performance.now();
     const sh = (t, src) => { const o = gl.createShader(t); gl.shaderSource(o, src); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
     const pr = gl.createProgram();
     gl.attachShader(pr, sh(gl.VERTEX_SHADER, vs));
@@ -28,6 +32,10 @@ const res = await p.evaluate(async (specs) => {
     gl.bindAttribLocation(pr, 0, 'position');
     gl.linkProgram(pr);
     if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+    gl.useProgram(pr);
+    gl.drawArrays(gl.TRIANGLES, 0, 3); // drivers may compile lazily, at the first draw
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+    compileMs[s.name] = performance.now() - t0; // compile + link + first draw: the load-time stall
     return pr;
   });
   const lobes = new Float32Array(20);
@@ -44,6 +52,7 @@ const res = await p.evaluate(async (specs) => {
   gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   const px = new Uint8Array(4);
   const out = {};
+  for (const k in compileMs) out[`${k} compile+link`] = `${compileMs[k].toFixed(0)} ms`;
   for (const level of [0, 0.7]) {
     const ms = specs.map(() => []);
     for (let k = 0; k < 2; k++) progs.forEach((pr) => { set(pr, level); gl.drawArrays(gl.TRIANGLES, 0, 3); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); });

@@ -1,4 +1,4 @@
-// Page settings. S1 defaults; S2 reads the device flags from GET /device-config.
+// Page settings. Defaults here; the device flags and limits come from GET /device-config.
 
 export const PAGE_VERSION: string = __BLOB_VERSION__;
 
@@ -13,6 +13,7 @@ export interface DeviceConfig {
   quiet_hours: string;
   followup_listen_s: number;
   listen_no_speech_s: number;
+  silence_rms: number;
 }
 
 export const DEFAULT_DEVICE = 'desktop';
@@ -22,13 +23,14 @@ export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
   quiet_hours: '',
   followup_listen_s: 6,
   listen_no_speech_s: 8,
+  silence_rms: SILENCE_RMS,
 };
 
 export function wsUrl(loc: Pick<Location, 'protocol' | 'host'> = location): string {
   return `${loc.protocol === 'https:' ? 'wss' : 'ws'}://${loc.host}/ws`;
 }
 
-// Missing or failed config falls back to the defaults: the flags only matter from S3/S4 on.
+// Missing or failed config falls back to the defaults (sound and wake off).
 export async function fetchDeviceConfig(token: string, device: string): Promise<DeviceConfig> {
   try {
     const r = await fetch(`/device-config?device=${encodeURIComponent(device)}`, {

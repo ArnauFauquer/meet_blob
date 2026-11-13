@@ -27,7 +27,7 @@ from the `espeakng-loader` wheel.
 ```sh
 cd backend
 uv sync
-cp ../.env.example .env        # then edit: HERMES_URL, HERMES_KEY, HERMES_MODEL, DEVICE_TOKEN
+cp ../.env.example .env        # then edit: HERMES_URL, HERMES_KEY, HERMES_MODEL, DEVICE_TOKEN, ALERT_TOKEN
 ```
 
 ### Fast run, no models (`BLOB_FAKE_MODELS=1`)
@@ -39,11 +39,11 @@ or run end-to-end tests in seconds.
 
 ```sh
 # terminal 1: a fake Hermes that records what it receives (GET /requests)
-uv run python tests/fakes/fake_hermes.py --port 8642     # --mode error|markdown, --delay S
+uv run python tests/fakes/fake_hermes.py --port 8642     # --mode error|markdown|question, --delay S
 
 # terminal 2
 BLOB_FAKE_MODELS=1 HERMES_URL=http://127.0.0.1:8642 HERMES_KEY=dev HERMES_MODEL=hermes-agent \
-DEVICE_TOKEN=devtoken DB_PATH=./blob.db STATIC_DIR=../web/dist \
+DEVICE_TOKEN=devtoken ALERT_TOKEN=alerttoken DB_PATH=./blob.db STATIC_DIR=../web/dist \
 DEVICES_PATH=../config/devices.example.json uv run blob
 ```
 
@@ -52,7 +52,7 @@ DEVICES_PATH=../config/devices.example.json uv run blob
 ```sh
 STT_MODEL=small STT_COMPUTE=int8 MODEL_DIR=.models \
 HERMES_URL=http://127.0.0.1:8642 HERMES_KEY=dev HERMES_MODEL=hermes-agent \
-DEVICE_TOKEN=devtoken DB_PATH=./blob.db STATIC_DIR=../web/dist \
+DEVICE_TOKEN=devtoken ALERT_TOKEN=alerttoken DB_PATH=./blob.db STATIC_DIR=../web/dist \
 DEVICES_PATH=../config/devices.example.json uv run blob
 ```
 
@@ -71,7 +71,10 @@ uv run python scripts/e2e_turn.py --url ws://127.0.0.1:8000/ws --token devtoken 
 ```
 
 `e2e_turn.py` also takes `--empty`, `--cancel-after S`, `--busy-check`,
-`--expect-error not_ready` and `--save-tts out.wav`. Other tools: `scripts/stt_cli.py` (transcribe
+`--expect-error not_ready`, `--save-tts out.wav`, and (S3) `--wake [--followup]` with
+`--device tablet` and `--expect-followup true|false`. `scripts/e2e_alerts.py` drives the S4 flows
+(alert over HTTP, `alert_read`, `alert_ack`, a 2 s timer, a spoken timer through the timer rule,
+`wake` gating); see [`docs/testing/exit-tests.md`](docs/testing/exit-tests.md). Other tools: `scripts/stt_cli.py` (transcribe
 a WAV), `scripts/tts_cli.py` (synthesise text), `scripts/timings_report.py` (SC1 median).
 
 ### Endpoints
@@ -82,6 +85,7 @@ a WAV), `scripts/tts_cli.py` (synthesise text), `scripts/timings_report.py` (SC1
 | `/healthz` | always 200 while the process runs; body `{alive, ready, hermes_reachable}` |
 | `/readyz` | 503 until the database is open and both models are loaded, then 200 |
 | `/device-config?device=NAME` | `Authorization: Bearer DEVICE_TOKEN`; the device's `sound`/`wake` flags and page limits |
+| `/alerts` | `Authorization: Bearer ALERT_TOKEN`; `POST`, `GET`, `DELETE /alerts/{key}` ([`docs/alerts.md`](docs/alerts.md)) |
 | `/` | the built page from `STATIC_DIR` (`index.html` with `Cache-Control: no-cache`), or 404 with a message if it is not built |
 
 ### Configuration

@@ -27,6 +27,7 @@ export default defineConfig({
     },
   },
   build: { chunkSizeWarningLimit: 800 }, // three.js alone is about 540 kB
+  worker: { format: 'es' }, // the wake word worker is a module worker (onnxruntime-web)
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.ts'],
