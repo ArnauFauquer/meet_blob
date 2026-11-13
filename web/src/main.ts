@@ -20,7 +20,8 @@ import { loadCredentials, TOKEN_KEY } from './token';
 import { TurnClient, type TurnDeps } from './turn-client';
 import { VadController } from './vad';
 import type { Detector, WakeConfig } from './wake/detector';
-import { FollowUp, wakeAllowed } from './wake/wake-gate';
+import { FollowUp, gateReason, wakeAllowed } from './wake/wake-gate';
+import { PeakTracker, type WakePeak } from './wake/wake-log';
 import { checkVersion } from './version';
 import { keepAwake } from './wakelock';
 import { BlobSocket, type SocketStatus } from './ws';
@@ -50,6 +51,7 @@ let wakeCfg: WakeConfig | null = null;
 let wakeReady = false;
 let wakeOn = false; // the wake word ran on the last audio block
 const wakeStats = { score: 0, max: 0, detections: 0 };
+let peaks: PeakTracker | null = null;
 const followup = new FollowUp();
 const vad = new VadController(() => detector?.reset(false, true));
 
@@ -94,22 +96,33 @@ function maybeFollowup(): void {
   if (handsFree && followup.take(playback.playing, turn.phase) && !turn.startTurn('followup')) followup.clear();
 }
 
-const gateOpen = () =>
-  wakeAllowed({
-    enabled: handsFree && wakeReady,
-    phase: turn.phase,
-    conv,
-    playing: playback.playing || reader.reading,
-    lastPlaybackEnd,
-    followup: followup.active,
-    now: performance.now(),
-  });
+const gateInput = () => ({
+  enabled: handsFree && wakeReady,
+  phase: turn.phase,
+  conv,
+  playing: playback.playing || reader.reading,
+  lastPlaybackEnd,
+  followup: followup.active,
+  now: performance.now(),
+});
+const gateOpen = () => wakeAllowed(gateInput());
+
+// Wake log (backend standard output, client_event lines): each attempt's peak
+// score, and when and why the detector stops and starts.
+function logPeak(p: WakePeak | null): void {
+  if (p) sock.send({ type: 'client_event', kind: 'wake_peak', ...p });
+}
 
 // Every 20 ms block of the shared stream: to the wake word (only while the gate
 // is open) and to the VAD (only while a turn listens).
 function routeAudio(pcm: Int16Array): void {
-  const wake = gateOpen();
+  const why = gateReason(gateInput());
+  const wake = why === 'open';
   if (wake && !wakeOn) detector?.reset(true, false); // no audio from before the mute
+  if (wake !== wakeOn && wakeReady) {
+    if (!wake) logPeak(peaks?.flush(performance.now()) ?? null);
+    sock.send({ type: 'client_event', kind: 'wake_gate', on: wake, why });
+  }
   wakeOn = wake;
   detector?.push(pcm, wake, vad.active);
 }
@@ -117,7 +130,9 @@ function routeAudio(pcm: Int16Array): void {
 function onWakeScore(score: number): void {
   wakeStats.score = score;
   wakeStats.max = Math.max(wakeStats.max, score);
+  logPeak(peaks?.score(score, performance.now()) ?? null);
   if (!wakeCfg || score < wakeCfg.threshold || !gateOpen()) return;
+  logPeak(peaks?.flush(performance.now()) ?? null); // the detector stops now: report this attempt first
   if (turn.startTurn('wake')) {
     wakeStats.detections += 1;
     renderer?.flash();
@@ -129,6 +144,7 @@ async function startHandsFree(): Promise<void> {
   const { Detector, loadWakeConfig } = await import('./wake/detector');
   const cfg = await loadWakeConfig();
   wakeCfg = cfg;
+  peaks = new PeakTracker(cfg.threshold);
   detector = new Detector(cfg, {
     onReady(wake, vadOk) {
       wakeReady = wake;
@@ -197,6 +213,8 @@ const turnDeps: TurnDeps = {
   onTurn(t) {
     overlaySince = null;
     playback.newTurn(t);
+    // How the turn started (tap, wake, followup), next to the backend's timing line for turn t.
+    sock.send({ type: 'client_event', kind: 'turn_start', turn: t, how: turn.kind });
   },
   onMicDenied() {
     faults.set('mic_denied', true);

@@ -60,6 +60,21 @@ What this means:
 *   The e2e fixture `web/e2e/fixtures/hey-blob.wav` uses Kokoro's `am_puck` (score 0.93). The
     voice of the other fixtures, `am_adam`, scores 0.30 at normal speed and does not fire.
 
+### Reading the wake log in production
+
+A hands-free page reports what the wake word heard as `client_event` lines on the backend's
+standard output (`kubectl -n blob logs deploy/blob | grep client_event`):
+
+| `event` | Fields | Meaning |
+| --- | --- | --- |
+| `wake_peak` | `peak`, `ms`, `fired` | one attempt: a run of scores at or above 0.1, its highest score and length; `fired` when it reached the threshold. Ordinary speech and silence send nothing |
+| `wake_gate` | `on`, `why` | the detector started (`why: open`) or stopped: `turn` (a turn of this page), `busy` (the backend's turn, maybe another device's), `playing`, `hangover` (0.5 s after playback), `followup`, `off` |
+| `turn_start` | `turn`, `how` | the turn's id (matches the timing line) and how it started: `tap`, `wake` or `followup` |
+
+Saying the phrase with no `wake_peak` line, or peaks under the threshold, means the model did
+not hear it (lower the threshold or retrain). No `wake_gate on` after a turn means the detector
+never restarted, and `why` on the last `wake_gate off` says what held it.
+
 If misses are the problem, retrain with extra positives in the household's accent: Kokoro's
 British and Spanish voices (`tools/wake-word/kokoro_clips.py`), or recordings of the household
 saying the phrase, added to `positive_train` before `--augment_clips`. Recordings of real voices

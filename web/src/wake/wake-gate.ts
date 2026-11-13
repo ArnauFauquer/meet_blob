@@ -19,10 +19,19 @@ export interface GateInput {
 // no turn of another device, not during playback and 0.5 s after it, not during
 // follow-up listening.
 export function wakeAllowed(g: GateInput): boolean {
-  if (!g.enabled || g.followup) return false;
-  if (g.phase !== 'idle' || g.conv !== 'idle') return false;
-  if (g.playing) return false;
-  return g.lastPlaybackEnd === null || g.now - g.lastPlaybackEnd >= PLAYBACK_HANGOVER_MS;
+  return gateReason(g) === 'open';
+}
+
+// The same rules, naming the first one that keeps the detector off (for the wake log).
+export type GateReason = 'open' | 'off' | 'followup' | 'turn' | 'busy' | 'playing' | 'hangover';
+export function gateReason(g: GateInput): GateReason {
+  if (!g.enabled) return 'off';
+  if (g.followup) return 'followup';
+  if (g.phase !== 'idle') return 'turn'; // a turn of this page
+  if (g.conv !== 'idle') return 'busy'; // the backend's turn (this page's or another device's)
+  if (g.playing) return 'playing';
+  if (g.lastPlaybackEnd !== null && g.now - g.lastPlaybackEnd < PLAYBACK_HANGOVER_MS) return 'hangover';
+  return 'open';
 }
 
 // The follow-up window (design, Turn pipeline step 8): a `tts` of our turn with
