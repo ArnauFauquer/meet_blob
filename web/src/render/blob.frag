@@ -76,30 +76,35 @@ float sdRoundBox(vec3 p, vec3 b, float r) {
   return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
 }
 
-float alertShape(vec3 p, float id) {
+// Both alert shapes at once: (triangle, square). They share the transform and the shimmer.
+vec2 alertShapes(vec3 p) {
   float s = radius() / uRadius;
   p /= s;
   float a = 0.35 * sin(uFlow * 0.6);
   p.xz = mat2(cos(a), -sin(a), sin(a), cos(a)) * p.xz;
   p.yz = mat2(0.98, -0.2, 0.2, 0.98) * p.yz;
-  float d = id < 1.5
-    ? sdTriPrism(p + vec3(0.0, 0.15, 0.0), vec2(0.6, 0.2)) - 0.12
-    : sdRoundBox(p, vec3(0.6, 0.6, 0.32), 0.14);
+  vec2 d = vec2(sdTriPrism(p + vec3(0.0, 0.15, 0.0), vec2(0.6, 0.2)) - 0.12,
+                sdRoundBox(p, vec3(0.6, 0.6, 0.32), 0.14));
   d += (noise(p * 2.0 + vec3(0.0, uFlow * 0.6, 0.0)) - 0.5) * 0.03; // liquid shimmer
   return d * s;
 }
 
-float shape(vec3 p, float id) {
-  if (id < 0.5) return sphereShape(p);
-  return alertShape(p, id);
+// Shape ids (SHAPE in tables.ts): 0 sphere, 1 triangle, 2 square.
+float pickShape(float id, float sphere, vec2 alerts) {
+  return id < 0.5 ? sphere : (id < 1.5 ? alerts.x : alerts.y);
 }
 
 float map(vec3 p) {
-  float a = shape(p, uShapeA);
-  if (uMix < 0.001) return a;
+  bool morph = uMix > 0.001;
+  // Each distance function appears once here (not once per shape slot), so the
+  // compiled shader stays small: software GL stalls the page while it compiles.
+  float sphere = (uShapeA < 0.5 || (morph && uShapeB < 0.5)) ? sphereShape(p) : 0.0;
+  vec2 alerts = (uShapeA > 0.5 || (morph && uShapeB > 0.5)) ? alertShapes(p) : vec2(0.0);
+  float a = pickShape(uShapeA, sphere, alerts);
+  if (!morph) return a;
   // A mix of two distance fields is not a true distance: scaling it by 0.875
   // turns the usual 0.8 march step into about 0.7 while morphing.
-  return mix(a, shape(p, uShapeB), uMix) * 0.875;
+  return mix(a, pickShape(uShapeB, sphere, alerts), uMix) * 0.875;
 }
 
 vec3 normalAt(vec3 p) {
