@@ -17,7 +17,7 @@
 | Latency, non-streaming, no tools | 2.5 s to 4.2 s per turn | tests A and B |
 | Latency with Hermes memory lookup | 8.6 s | test C |
 | Tokens per turn | About 17,200 prompt tokens for a one-line question (Hermes system prompt and tools); 55,550 when it searched memory | `usage` field |
-| Can Hermes call Blob's `/alerts` and report failure? | **Not tested.** Blob does not exist yet. The test needs a stub endpoint and a Hermes tool or skill | pending |
+| Can Hermes call Blob's `/alerts` with a bearer token and report the result? | **Yes** (tested 2026-11-13 against the deployed Blob). Asked through the chat API to run `curl -X POST http://blob.blob-test.svc.cluster.local/alerts` with the alert token in the prompt, Hermes ran it from its terminal and answered `HTTP 201` with the created alert (`state: pending`, `fire_at` 90 s ahead); `GET /alerts` showed it. The token passed through Hermes's context, so it may sit in Hermes's memory; the one used was a test token in a namespace that was deleted afterwards. The timer rule in Blob stays on as a fallback (`TIMER_RULE`) | 2026-11-13 test |
 | Does a client disconnect stop a Hermes run? | **Not tested** | pending |
 | Is there a separate profile or toolset for Blob? | **Not tested** | pending |
 

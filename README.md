@@ -125,9 +125,28 @@ reply cut at `TTS_MAX_CHARS` prints `"kind": "tts_cut"`.
 
 ## Web page
 
-*To be written by the web session:* how to install, run (`npm run dev`), test and build the
-page in `web/`, and how the dev server reaches the backend.
+The page is a static TypeScript app in `web/` (Vite, three.js, vitest, Playwright). The backend serves the built files from `web/dist` (`STATIC_DIR`) and sends `index.html` with `Cache-Control: no-cache`.
+
+```sh
+cd web
+npm ci
+npm run dev          # http://localhost:5173, proxies /ws and the HTTP endpoints to BLOB_BACKEND (default http://localhost:8000)
+npm run lint && npm run typecheck && npm test && npm run build   # build after the backend is merged: the page version comes from backend/blob/__init__.py
+```
+
+Install a browser once with its token: open `https://<host>/#t=<DEVICE_TOKEN>&device=<name>`. The page stores both in `localStorage` and removes them from the address bar. Tap the blob to talk, tap again to send; tap while it thinks or speaks to cancel; long press opens diagnostics; tap an alert to hear it and clear it. On a device with `wake: true` in `config/devices.json` the page also loads the wake-word and voice-activity models from `/models/` and listens for the phrase in `web/public/models/wake.json` (stock phrase "hey jarvis"; see `docs/wake-word-training.md` for "hey blob").
+
+End-to-end tests (Chromium headless, fake microphone, software GL):
+
+```sh
+npx playwright install chromium
+npm run e2e                                  # against the mock backend (web/e2e/mock-backend.ts)
+BLOB_URL=http://localhost:8000 BLOB_TOKEN=<DEVICE_TOKEN> BLOB_ALERT_TOKEN=<ALERT_TOKEN> npx playwright test   # against a running backend (mock-only specs are skipped)
+npm run screenshots                          # rewrites docs/screenshots/ and the PWA icons
+```
+
+For the real-backend run, `config/devices.json` needs the devices `hf-wake`, `hf-vad`, `hf-quiet` (`wake: true`) and `e2e-sound` (`sound: true`). Screenshots of every state and of alerts are in `docs/screenshots/`; the look and its limits are in `docs/notes/look.md`.
 
 ## Deployment
 
-*To be written by the deployment session* (container image, Kubernetes manifests, tablet install).
+The container image (`Dockerfile`) is built and pushed to `ghcr.io/arnaufauquer/meet_blob` by `.github/workflows/image.yml` (tag `sha-<short commit>`). The Kubernetes side lives in the `home_lab` repo (branch `feat/blob`: Helm chart `faukinator/blob`, Argo application, Terraform secret, and a NetworkPolicy for Hermes). Read `deploy/README.md` and `docs/notes/deploy.md` first. Alerts are created through `POST /alerts` (see `docs/alerts.md`). What was verified, and what was not, is in `docs/coordination/integration.md`.
