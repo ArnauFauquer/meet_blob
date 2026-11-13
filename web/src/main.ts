@@ -21,7 +21,7 @@ import { TurnClient, type TurnDeps } from './turn-client';
 import { VadController } from './vad';
 import type { Detector, WakeConfig } from './wake/detector';
 import { FollowUp, gateReason, wakeAllowed } from './wake/wake-gate';
-import { PeakTracker, type WakePeak } from './wake/wake-log';
+import { MicStats, PeakTracker, type WakePeak } from './wake/wake-log';
 import { checkVersion } from './version';
 import { keepAwake } from './wakelock';
 import { BlobSocket, type SocketStatus } from './ws';
@@ -52,13 +52,35 @@ let wakeReady = false;
 let wakeOn = false; // the wake word ran on the last audio block
 const wakeStats = { score: 0, max: 0, detections: 0 };
 let peaks: PeakTracker | null = null;
+const mic = new MicStats();
+const MIC_LOG_MS = 10_000;
+
+// Every 10 s on a hands-free page: is audio arriving, how loud, and the state
+// of the AudioContext and the microphone track (client_event `mic`).
+function logMic(): void {
+  const t = capture.track;
+  const s = t?.getSettings();
+  sock.send({
+    type: 'client_event',
+    kind: 'mic',
+    ...mic.take(),
+    ctx: ctx.state,
+    rate: ctx.sampleRate,
+    visible: document.visibilityState,
+    track: t ? { label: t.label, muted: t.muted, enabled: t.enabled, state: t.readyState } : null,
+    settings: s ? { rate: s.sampleRate, ec: s.echoCancellation, ns: s.noiseSuppression, agc: s.autoGainControl } : null,
+  });
+}
 const followup = new FollowUp();
 const vad = new VadController(() => detector?.reset(false, true));
 
 // Audio is locked until a user gesture lets the AudioContext run.
 const audioLocked = () => ctx.state !== 'running';
 const syncAudioLock = () => faults.set('audio_locked', audioLocked());
-ctx.onstatechange = syncAudioLock;
+ctx.onstatechange = () => {
+  syncAudioLock();
+  if (handsFree) sock.send({ type: 'client_event', kind: 'audio_ctx', state: ctx.state });
+};
 syncAudioLock();
 
 const reader = new AlertReader({
@@ -116,6 +138,7 @@ function logPeak(p: WakePeak | null): void {
 // Every 20 ms block of the shared stream: to the wake word (only while the gate
 // is open) and to the VAD (only while a turn listens).
 function routeAudio(pcm: Int16Array): void {
+  mic.add(pcm);
   const why = gateReason(gateInput());
   const wake = why === 'open';
   if (wake && !wakeOn) detector?.reset(true, false); // no audio from before the mute
@@ -161,6 +184,11 @@ async function startHandsFree(): Promise<void> {
   capture.onFrame = routeAudio;
   try {
     await capture.openShared();
+    const t = capture.track;
+    for (const ev of ['mute', 'unmute', 'ended'] as const) {
+      t?.addEventListener(ev, () => sock.send({ type: 'client_event', kind: 'mic_track', event: ev, ctx: ctx.state }));
+    }
+    setInterval(logMic, MIC_LOG_MS);
   } catch {
     faults.set('mic_denied', true);
     sock.send({ type: 'client_event', kind: 'fault', fault: 'mic_denied' });
