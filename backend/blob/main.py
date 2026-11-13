@@ -25,6 +25,7 @@ from .alerts import Alerts, run_scheduler
 from .auth import require_device_token
 from .config import Settings
 from .db import Db
+from .debugaudio import AudioDump
 from .devices import Device, DeviceConfig, load_devices
 from .fakes import FakeStt, FakeTts
 from .gpu import Gpu
@@ -109,6 +110,13 @@ def create_app(
             transport=hermes_transport,
         )
         st.hub = Hub(settings.device_token, lambda: st.ready, devices)
+        if settings.debug_audio_dir:
+            st.hub.audio_dump = AudioDump(settings.debug_audio_dir, settings.debug_audio_keep)
+            log.warning(
+                "debug audio on: keeping the last %d utterances in %s",
+                settings.debug_audio_keep,
+                settings.debug_audio_dir,
+            )
         st.alerts = st.hub.alerts = Alerts(st.db, st.hub.broadcast_snapshot, wall)
         await st.alerts.load()  # overdue timers fire once, marked late
         st.hub.turns = TurnManager(
