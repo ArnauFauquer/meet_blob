@@ -18,16 +18,16 @@ RUN npm run build
 # has no cuDNN reference (cudart is static), so the CUDA "base" image plus cuBLAS is enough.
 # The "runtime" image (3.5 GB more: cuFFT, cuSPARSE, NPP...) also works if this ever fails.
 # kokoro-onnx and the faster-whisper VAD use the CPU onnxruntime. Switching to onnxruntime-gpu
-# needs cuDNN 9: use the 12.9.1-cudnn-runtime-ubuntu24.04 tag then.
+# needs cuDNN 9: use the 12.9.2-cudnn-runtime-ubuntu24.04 tag then.
 # kube1's driver (580) supports CUDA <= 13.0.
 FROM nvidia/cuda:12.9.2-base-ubuntu24.04
 
 # One line per system package. espeak-ng is not needed: kokoro-onnx bundles it via espeakng-loader.
 # tzdata: the chart sets TZ (quiet hours are local time).
-# libcublas: same version the 12.9.1 runtime image ships.
+# libcublas: same version the 12.9.2 runtime image ships.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      libcublas-12-9=12.9.1.4-1 \
+      libcublas-12-9=12.9.2.10-1 \
       python3.12 \
       ca-certificates \
       tzdata \
