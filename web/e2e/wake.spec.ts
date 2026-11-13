@@ -24,7 +24,7 @@ test('wake word: "hey jarvis" sends wake, the turn listens, the VAD ends it, not
   expect(l.filter((e) => e.dir === 'gum')).toHaveLength(1);
   expect((await dbg<{ max: number }>(page, 'handsFree')).max).toBeGreaterThan(0.5);
 
-  l = await waitFor(page, (l) => recv(l, 'state').some((e) => e.t > wake.t && e.data?.conv === 'listening'), 'listening');
+  await waitFor(page, (l) => recv(l, 'state').some((e) => e.t > wake.t && e.data?.conv === 'listening'), 'listening');
   expect(await dbg(page, 'turnKind')).toBe('wake');
   l = await waitFor(page, (l) => sent(l, 'utterance').length > 0, 'utterance sent by the VAD (no stop tap)');
   const i = l.findIndex((e) => e.dir === 'send' && e.data?.type === 'utterance');
