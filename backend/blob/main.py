@@ -111,7 +111,9 @@ def create_app(
         )
         st.hub = Hub(settings.device_token, lambda: st.ready, devices)
         if settings.debug_audio_dir:
-            st.hub.audio_dump = AudioDump(settings.debug_audio_dir, settings.debug_audio_keep)
+            st.hub.audio_dump = AudioDump(
+                settings.debug_audio_dir, settings.debug_audio_keep, settings.debug_wake_keep
+            )
             log.warning(
                 "debug audio on: keeping the last %d utterances in %s",
                 settings.debug_audio_keep,
@@ -187,6 +189,7 @@ def create_app(
             followup_listen_s=settings.followup_listen_s,
             listen_no_speech_s=settings.listen_no_speech_s,
             silence_rms=settings.silence_rms,
+            debug_audio=bool(settings.debug_audio_dir),
         )
 
     app.include_router(alerts.router)

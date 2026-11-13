@@ -25,6 +25,7 @@ const clientSamples: { [K in ClientMessage['type']]: Extract<ClientMessage, { ty
   ping: { type: 'ping' },
   client_event: { type: 'client_event', kind: 'fault' },
   wake: { type: 'wake', followup: false },
+  wake_clip: { type: 'wake_clip', label: 'pos', peak: 0.5, dur_ms: 1000 },
   alert_read: { type: 'alert_read', key: 'k' },
   alert_ack: { type: 'alert_ack', key: 'k' },
 };

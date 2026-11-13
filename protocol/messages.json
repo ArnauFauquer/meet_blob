@@ -86,6 +86,15 @@
         "followup": "bool, default false"
       }
     },
+    "wake_clip": {
+      "slice": "debug",
+      "binary": "raw little-endian signed 16-bit mono PCM, 16000 Hz (at most 10 s)",
+      "fields": {
+        "label": "pos | neg | auto: an enrollment sample of the wake phrase, of other speech, or an attempt the wake word heard (peak >= 0.1)",
+        "peak": "float 0..1, highest wake word score over the clip",
+        "dur_ms": "int > 0"
+      }
+    },
     "alert_read": {
       "slice": "S4",
       "fields": {
@@ -155,7 +164,7 @@
   "http": {
     "GET /device-config?device=<name>": {
       "auth": "Authorization: Bearer <DEVICE_TOKEN>, 401 otherwise",
-      "response": "{device, sound, wake, quiet_hours, followup_listen_s, listen_no_speech_s, silence_rms}"
+      "response": "{device, sound, wake, quiet_hours, followup_listen_s, listen_no_speech_s, silence_rms, debug_audio}"
     },
     "GET /healthz": "always 200, body {alive, ready, hermes_reachable}",
     "GET /readyz": "503 until models loaded, then 200",
@@ -175,6 +184,7 @@
   },
   "notes": [
     "alert_read: a failed synthesis or an unknown key answers error{bad_message}; a tap before the models load answers error{not_ready}",
-    "tts.followup is set for every device; the page must ignore it on devices with wake=false"
+    "tts.followup is set for every device; the page must ignore it on devices with wake=false",
+    "wake_clip: the page sends it only when /device-config says debug_audio=true; the backend drops the clip when DEBUG_AUDIO_DIR is unset"
   ]
 }

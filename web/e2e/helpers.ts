@@ -55,9 +55,9 @@ function instrument() {
   };
 }
 
-export async function openBlob(page: Page, device: string, token = TOKEN): Promise<void> {
+export async function openBlob(page: Page, device: string, token = TOKEN, query = ''): Promise<void> {
   await page.addInitScript(instrument);
-  await page.goto(`/#t=${encodeURIComponent(token)}&device=${encodeURIComponent(device)}`);
+  await page.goto(`/${query}#t=${encodeURIComponent(token)}&device=${encodeURIComponent(device)}`);
 }
 
 export const log = (page: Page) => page.evaluate(() => (window as unknown as { __log: LogEntry[] }).__log);

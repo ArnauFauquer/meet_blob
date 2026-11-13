@@ -43,3 +43,24 @@ test('wake word: "hey blob" sends wake, the turn listens, the VAD ends it, nothi
   expect(ev).toContainEqual(expect.objectContaining({ kind: 'wake_gate', on: false, why: 'turn' }));
   expect(ev).toContainEqual(expect.objectContaining({ kind: 'turn_start', turn: expect.any(Number), how: 'wake' }));
 });
+
+test('wake clips: an attempt sends its audio when the server keeps debug audio', async ({ page }) => {
+  test.setTimeout(120_000);
+  await openBlob(page, 'hf-debug');
+  const l = await waitFor(page, (l) => sent(l, 'wake_clip').length > 0, 'wake_clip sent');
+  const i = l.findIndex((e) => e.dir === 'send' && e.data?.type === 'wake_clip');
+  expect(l[i].data).toMatchObject({ type: 'wake_clip', label: 'auto', peak: expect.any(Number) });
+  expect(l[i].data!.peak as number).toBeGreaterThanOrEqual(0.1);
+  expect(l[i + 1].data!.binary).toBe((l[i].data!.dur_ms as number) * 32); // 16 kHz s16le
+});
+
+test('enrollment (?enroll=pos): one clip per phrase, no turn starts', async ({ page }) => {
+  test.setTimeout(120_000);
+  await openBlob(page, 'hf-debug', undefined, '?enroll=pos');
+  const l = await waitFor(page, (l) => sent(l, 'wake_clip').length >= 2, 'two clips sent');
+  const clips = sent(l, 'wake_clip').map((e) => e.data!);
+  expect(clips.every((c) => c.label === 'pos')).toBe(true);
+  expect(Math.max(...clips.map((c) => c.peak as number))).toBeGreaterThan(0.35); // the "hey blob" phrase
+  expect(sent(l, 'wake')).toHaveLength(0);
+  await expect(page.locator('#enroll')).toContainText('sent');
+});

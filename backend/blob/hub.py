@@ -28,6 +28,7 @@ from .schemas import (
     Tts,
     Utterance,
     Wake,
+    WakeClip,
     client_message,
 )
 from .turn import TurnManager
@@ -35,6 +36,7 @@ from .turn import TurnManager
 log = logging.getLogger(__name__)
 
 MAX_FRAME = 1 << 20  # 15 s of 16 kHz 16-bit audio is about 480 KB
+MAX_WAKE_CLIP = 10 * 16000 * 2  # 10 s
 CLOSE_BEFORE_HELLO = 4400
 CLOSE_BAD_TOKEN = 4401
 
@@ -44,7 +46,8 @@ class Connection:
         self.ws = ws
         self.device = device
         self._lock = asyncio.Lock()
-        self.pending: Utterance | None = None  # utterance header waiting for its binary frame
+        # utterance or wake_clip header waiting for its binary frame
+        self.pending: Utterance | WakeClip | None = None
 
     async def send(self, msg: BaseModel, binary: bytes | None = None) -> None:
         """Write a header and its binary frame together; a closed socket is ignored."""
@@ -82,6 +85,7 @@ class Hub:
             "ping": self._ping,
             "client_event": self._client_event,
             "wake": self._wake,
+            "wake_clip": self._wake_clip,
             "alert_read": self._alert_read,
             "alert_ack": self._alert_ack,
         }
@@ -163,6 +167,10 @@ class Hub:
         utt, conn.pending = conn.pending, None
         if utt is None:
             return  # audio is dropped unless a turn is waiting for it
+        if isinstance(utt, WakeClip):
+            if self.audio_dump is not None and len(data) <= MAX_WAKE_CLIP:
+                self.audio_dump.save_wake(conn.device, utt.label, utt.peak, data)
+            return
         if len(data) > MAX_FRAME:
             await conn.send(Error(code=ErrorCode.BAD_MESSAGE))
             await self.turns.cancel(conn, utt.turn)
@@ -184,6 +192,10 @@ class Hub:
             await conn.send(Error(code=ErrorCode.BAD_MESSAGE))
         else:
             await self._tap(conn, msg)
+
+    async def _wake_clip(self, conn: Connection, msg: WakeClip) -> None:
+        """Debug: the binary frame that follows is saved (or dropped when debug audio is off)."""
+        conn.pending = msg
 
     async def _alert_read(self, conn: Connection, msg: AlertRead) -> None:
         if not self._is_ready():

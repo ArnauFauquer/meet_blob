@@ -20,6 +20,7 @@ import { loadCredentials, TOKEN_KEY } from './token';
 import { TurnClient, type TurnDeps } from './turn-client';
 import { VadController } from './vad';
 import type { Detector, WakeConfig } from './wake/detector';
+import { PcmRing, PhraseSegmenter, ScoreHistory, msToSamples, samplesToMs } from './wake/clips';
 import { FollowUp, gateReason, wakeAllowed } from './wake/wake-gate';
 import { MicStats, PeakTracker, type WakePeak } from './wake/wake-log';
 import { checkVersion } from './version';
@@ -50,10 +51,43 @@ let detector: Detector | null = null;
 let wakeCfg: WakeConfig | null = null;
 let wakeReady = false;
 let wakeOn = false; // the wake word ran on the last audio block
+let wakeVerifier = false; // the custom verifier loaded
 const wakeStats = { score: 0, max: 0, detections: 0 };
 let peaks: PeakTracker | null = null;
 const mic = new MicStats();
 const MIC_LOG_MS = 10_000;
+
+// Wake word clips for retraining (wake_clip; the backend keeps them only with
+// DEBUG_AUDIO_DIR set). Normal use: the last 3 s around each attempt the wake
+// word heard. Enrollment (open the page with ?enroll=pos to say the wake phrase
+// over and over, ?enroll=neg to talk about anything else): one clip per phrase,
+// and no turns start.
+const CLIP_MS = 3000;
+const SCORE_LAG_MS = 1300; // the score peaks up to this long after the phrase
+const enroll = ((l) => (l === 'pos' || l === 'neg' ? l : null))(new URLSearchParams(location.search).get('enroll'));
+const ring = new PcmRing(msToSamples(CLIP_MS));
+const segmenter = new PhraseSegmenter();
+const scores = new ScoreHistory();
+const enrolled = { sent: 0, last: 0 };
+
+function sendClip(label: 'pos' | 'neg' | 'auto', peak: number, pcm: Int16Array): void {
+  if (!deviceConfig.debug_audio || !pcm.length) return;
+  if (sock.send({ type: 'wake_clip', label, peak, dur_ms: samplesToMs(pcm.length) }, pcm.buffer as ArrayBuffer) && label !== 'auto') {
+    enrolled.sent += 1;
+    enrolled.last = peak;
+  }
+  showEnroll();
+}
+
+function showEnroll(): void {
+  if (!enroll) return;
+  const el = $('enroll');
+  el.hidden = false;
+  el.textContent = !deviceConfig.debug_audio
+    ? 'Enrollment needs DEBUG_AUDIO_DIR on the server'
+    : `${enroll === 'pos' ? `Say "${wakeCfg?.phrase ?? 'hey blob'}", pause, repeat` : 'Talk about anything else'}` +
+      ` · ${enrolled.sent} sent · last ${enrolled.last.toFixed(2)} · now ${wakeStats.score.toFixed(2)}`;
+}
 
 // Every 10 s on a hands-free page: is audio arriving, how loud, and the state
 // of the AudioContext and the microphone track (client_event `mic`).
@@ -132,13 +166,22 @@ const gateOpen = () => wakeAllowed(gateInput());
 // Wake log (backend standard output, client_event lines): each attempt's peak
 // score, and when and why the detector stops and starts.
 function logPeak(p: WakePeak | null): void {
-  if (p) sock.send({ type: 'client_event', kind: 'wake_peak', ...p });
+  if (!p) return;
+  sock.send({ type: 'client_event', kind: 'wake_peak', ...p });
+  if (!enroll) sendClip('auto', p.peak, ring.take(msToSamples(CLIP_MS)));
 }
 
 // Every 20 ms block of the shared stream: to the wake word (only while the gate
 // is open) and to the VAD (only while a turn listens).
 function routeAudio(pcm: Int16Array): void {
   mic.add(pcm);
+  ring.push(pcm);
+  const phrase = enroll ? segmenter.push(pcm) : null;
+  if (phrase && enroll) {
+    const end = performance.now();
+    const from = end - samplesToMs(phrase.length);
+    setTimeout(() => sendClip(enroll, scores.peak(from, end + SCORE_LAG_MS), phrase), SCORE_LAG_MS);
+  }
   const why = gateReason(gateInput());
   const wake = why === 'open';
   if (wake && !wakeOn) detector?.reset(true, false); // no audio from before the mute
@@ -153,7 +196,9 @@ function routeAudio(pcm: Int16Array): void {
 function onWakeScore(score: number): void {
   wakeStats.score = score;
   wakeStats.max = Math.max(wakeStats.max, score);
+  scores.add(score, performance.now());
   logPeak(peaks?.score(score, performance.now()) ?? null);
+  if (enroll) return showEnroll(); // enrollment: scores only, no turns
   if (!wakeCfg || score < wakeCfg.threshold || !gateOpen()) return;
   logPeak(peaks?.flush(performance.now()) ?? null); // the detector stops now: report this attempt first
   if (turn.startTurn('wake')) {
@@ -169,8 +214,9 @@ async function startHandsFree(): Promise<void> {
   wakeCfg = cfg;
   peaks = new PeakTracker(cfg.threshold);
   detector = new Detector(cfg, {
-    onReady(wake, vadOk) {
+    onReady(wake, vadOk, verifierOk) {
       wakeReady = wake;
+      wakeVerifier = verifierOk;
       if (vadOk) turnDeps.vad = vad;
     },
     onScore: onWakeScore,
@@ -311,6 +357,7 @@ function onTap(): void {
   }
   const locked = audioLocked();
   void ctx.resume(); // on every tap (design: Sound targets)
+  if (enroll) return; // enrollment: a tap only unlocks the audio
   const action = decideTap({
     audioLocked: locked,
     overlay: overlay(),
@@ -372,7 +419,7 @@ const diag = new Diag($('diag'), () => ({
   device_config: deviceConfig,
   alerts: alerts.map((a) => `${a.key}:${a.source}:${a.urgency}`).join(' ') || 'none',
   wake: handsFree
-    ? { phrase: wakeCfg?.phrase, model: wakeCfg?.model, ready: wakeReady, running: wakeOn, score: +wakeStats.score.toFixed(3), max: +wakeStats.max.toFixed(3), detections: wakeStats.detections }
+    ? { phrase: wakeCfg?.phrase, model: wakeCfg?.model, verifier: wakeCfg?.verifier ? wakeVerifier : 'none', threshold: wakeCfg?.threshold, enroll: enroll ?? 'off', ready: wakeReady, running: wakeOn, score: +wakeStats.score.toFixed(3), max: +wakeStats.max.toFixed(3), detections: wakeStats.detections }
     : 'off (tap only)',
   vad: turnDeps.vad ? { listening: vad.active, p: +vad.lastP.toFixed(2) } : 'off',
 }));
@@ -384,7 +431,8 @@ void fetchDeviceConfig(creds.token, creds.device).then((c) => {
   configLoaded = true;
   capture.silenceRms = c.silence_rms;
   checkChime();
-  if (c.wake) void startHandsFree();
+  showEnroll();
+  if (c.wake || enroll) void startHandsFree();
 });
 
 // Hooks for the e2e tests and the screenshot scripts. Read-only except the

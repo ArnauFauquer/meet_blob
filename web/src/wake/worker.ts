@@ -5,7 +5,7 @@ import * as ort from 'onnxruntime-web/wasm';
 import wasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 import { Silero } from '@ricky0123/vad-web/dist/models/silero';
 import { bindModels } from './models';
-import { OwwPipeline } from './oww';
+import { OwwPipeline, isVerifier, type Verifier } from './oww';
 import type { FromWorker, ToWorker } from './messages';
 
 ort.env.wasm.numThreads = 1; // no SharedArrayBuffer, no cross-origin isolation needed
@@ -26,11 +26,24 @@ const bytes = async (url: string) => {
   return new Uint8Array(await r.arrayBuffer());
 };
 
-async function init(base: string, wakeModel: string): Promise<void> {
+async function loadVerifier(url: string): Promise<Verifier | null> {
+  try {
+    const r = await fetch(url);
+    const v: unknown = r.ok ? await r.json() : null;
+    return isVerifier(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+async function init(base: string, wakeModel: string, verifierFile: string): Promise<void> {
   const session = async (name: string) => ort.InferenceSession.create(await bytes(base + name));
+  // A missing or malformed verifier leaves the base model alone (ready.verifier=false).
+  const verifier = verifierFile ? await loadVerifier(base + verifierFile) : null;
   try {
     oww = new OwwPipeline(
       bindModels(ort, await session('melspectrogram.onnx'), await session('embedding_model.onnx'), await session(wakeModel)),
+      verifier,
     );
   } catch (e) {
     post({ type: 'error', what: 'wake', message: String(e) });
@@ -40,7 +53,7 @@ async function init(base: string, wakeModel: string): Promise<void> {
   } catch (e) {
     post({ type: 'error', what: 'vad', message: String(e) });
   }
-  post({ type: 'ready', wake: oww !== null, vad: vad !== null });
+  post({ type: 'ready', wake: oww !== null, vad: vad !== null, verifier: oww !== null && verifier !== null });
 }
 
 async function audio(pcm: Int16Array, wake: boolean, runVad: boolean): Promise<void> {
@@ -61,7 +74,7 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
   const m = ev.data;
   queue = queue
     .then(async () => {
-      if (m.type === 'init') return init(m.base, m.wakeModel);
+      if (m.type === 'init') return init(m.base, m.wakeModel, m.verifier);
       if (m.type === 'audio') return audio(m.pcm, m.wake, m.vad);
       if (m.wake) oww?.reset();
       if (m.vad) {

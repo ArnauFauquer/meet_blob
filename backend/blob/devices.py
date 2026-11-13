@@ -22,6 +22,7 @@ class DeviceConfig(BaseModel):
     followup_listen_s: float
     listen_no_speech_s: float
     silence_rms: float
+    debug_audio: bool = False  # DEBUG_AUDIO_DIR is set: the page may send wake_clip audio
 
 
 _devices = TypeAdapter(dict[str, Device])

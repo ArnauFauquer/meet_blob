@@ -1,1 +1,1 @@
-{ "model": "hey_blob.onnx", "phrase": "hey blob", "threshold": 0.5 }
+{ "model": "hey_blob.onnx", "phrase": "hey blob", "threshold": 0.35, "verifier": "" }
