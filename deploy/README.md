@@ -67,8 +67,9 @@ Every other setting keeps the default in `backend/blob/config.py`.
    automatically, and the app-of-apps picks up `applications/blob.yaml`.
 2. `terraform apply` in `home_lab/terraform` creates namespace `blob` and Secret `blob-secrets`
    (before Argo CD creates the namespace, or the namespace resource conflicts).
-3. Create the ghcr pull Secret `github-docker-credentials` in namespace `blob` (home_lab
-   `docs/secrets.md`, "GitHub Container Registry"): the meet_blob package is private.
+3. No ghcr pull Secret is needed: meet_blob and its package `ghcr.io/arnaufauquer/meet_blob` are
+   public. The chart's `imagePullSecrets` entry can be emptied (`[]`); a missing Secret only makes
+   the kubelet log a warning, the pull still works.
 4. Set `image.tag` in `faukinator/blob/values.yaml` to the `sha-<commit>` tag CI pushed. The chart
    refuses to render without it.
 5. Point `blob.faukinator.com` at Traefik if the Pi-hole wildcard does not already cover it.

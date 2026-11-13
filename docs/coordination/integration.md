@@ -60,9 +60,10 @@ unit and mock-backend suites that the implementation sessions ran (their reports
 ## To go live (needs the owner)
 
 1. In `home_lab`, branch `feat/blob`: `terraform apply` (creates `blob-secrets`; needs the R2 credentials), merge
-   the branch to `main` so Argo deploys, copy the pull secret into the new namespace (`kubectl get secret
-   github-docker-credentials -n tistic-store -o json`, rename the namespace, `kubectl apply -n blob -f -`), and
-   check that `blob.faukinator.com` resolves to Traefik.
+   the branch to `main` so Argo deploys, and check that `blob.faukinator.com` resolves to Traefik. The image
+   is public (see `docs/coordination/reports/ci.md`), so the pull secret `github-docker-credentials` is no
+   longer needed in namespace `blob`; set `imagePullSecrets: []` in the chart (optional, a missing secret
+   only makes the kubelet warn).
 2. Read the device token (`terraform output` or the `blob-secrets` Secret) and open
    `https://blob.faukinator.com/#t=<DEVICE_TOKEN>&device=tablet` once on the tablet.
 3. Test on the tablet and report what fails (microphone permission, audio unlock, wake word, performance).

@@ -13,6 +13,8 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   workers: 1, // one backend, one turn lock
   fullyParallel: false,
+  // The 2-core CI runner starts the fake mic late on the first turn (timing asserts); a retry shows as "flaky".
+  retries: process.env.CI ? 1 : 0,
   reporter: [['list']],
   use: {
     baseURL: external ?? `http://localhost:${port}`,

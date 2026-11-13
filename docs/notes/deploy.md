@@ -70,10 +70,9 @@ by those CNIs by default. `kubectl port-forward` is not affected.
 
 1. **No GPU run yet.** CUDA/cuBLAS loading, `int8_float16` on the RTX 3050, VRAM use of
    `large-v3`, and the `nvidia` RuntimeClass injection are verified only on the first real deploy.
-2. **ghcr pull credentials.** meet_blob is a private repository, so its package is private. Before
-   the first sync, create Secret `github-docker-credentials` (type `docker-registry`, server
-   `ghcr.io`, a PAT with `read:packages`) in namespace `blob`; command in home_lab
-   `docs/secrets.md`. Alternative: make the package public and set `imagePullSecrets: []`.
+2. **ghcr pull credentials.** No longer needed: since 2026-11-13 meet_blob and its package are
+   public, so the image pulls anonymously. Set `imagePullSecrets: []` in the chart to drop the
+   reference to `github-docker-credentials` (harmless if left: the kubelet only warns).
 3. **Traefik WebSocket timeouts.** The page pings every 20 s. Traefik v3 entrypoints default to
    `readTimeout` 60 s and `idleTimeout` 180 s, and home_lab does not override them. Whether
    `readTimeout` cuts an upgraded WebSocket after 60 s was not verified. Test after deploy: keep

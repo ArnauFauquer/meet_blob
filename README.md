@@ -147,6 +147,15 @@ npm run screenshots                          # rewrites docs/screenshots/ and th
 
 For the real-backend run, `config/devices.json` needs the devices `hf-wake`, `hf-vad`, `hf-quiet` (`wake: true`) and `e2e-sound` (`sound: true`). Screenshots of every state and of alerts are in `docs/screenshots/`; the look and its limits are in `docs/notes/look.md`.
 
+## CI
+
+GitHub Actions, in `.github/workflows/`:
+
+*   `ci.yml`: backend (`ruff`, `mypy`, `pytest -m "not gpu" --cov`), web (`lint`, `typecheck`, `npm test`, `build`) and Playwright against the mock backend. It runs on every push to this repository and on pull requests from forks (read-only token, no secrets).
+*   `image.yml`: on pushes to `main` that touch the image inputs, runs `ci.yml` again and only then builds and pushes the image. Only this job has `packages: write`.
+
+Actions are pinned by commit SHA; the workflows default to `contents: read`.
+
 ## Deployment
 
-The container image (`Dockerfile`) is built and pushed to `ghcr.io/arnaufauquer/meet_blob` by `.github/workflows/image.yml` (tag `sha-<short commit>`). The Kubernetes side lives in the `home_lab` repo (branch `feat/blob`: Helm chart `faukinator/blob`, Argo application, Terraform secret, and a NetworkPolicy for Hermes). Read `deploy/README.md` and `docs/notes/deploy.md` first. Alerts are created through `POST /alerts` (see `docs/alerts.md`). What was verified, and what was not, is in `docs/coordination/integration.md`.
+The container image (`Dockerfile`) is built and pushed to `ghcr.io/arnaufauquer/meet_blob` by `.github/workflows/image.yml` (tag `sha-<short commit>`). The repository and the image are public, so `docker pull ghcr.io/arnaufauquer/meet_blob:sha-<short commit>` needs no login. The Kubernetes side lives in the `home_lab` repo (branch `feat/blob`: Helm chart `faukinator/blob`, Argo application, Terraform secret, and a NetworkPolicy for Hermes). Read `deploy/README.md` and `docs/notes/deploy.md` first. Alerts are created through `POST /alerts` (see `docs/alerts.md`). What was verified, and what was not, is in `docs/coordination/integration.md`.
