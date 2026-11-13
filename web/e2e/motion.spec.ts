@@ -62,7 +62,9 @@ async function sheet(page: Page, view: string, speech: boolean): Promise<void> {
   writeFileSync(`${OUT}${view}.png`, Buffer.from(png.split(',')[1], 'base64'));
 }
 
-// Milliseconds per drawn frame (median), synchronised with a 1-pixel readback.
+// Milliseconds per drawn frame, synchronised with a 1-pixel readback. The
+// fastest of n frames: other processes only ever add time, so the minimum is
+// the steadiest figure on a shared machine.
 async function frameCost(page: Page, view: string, level: number, n = 20): Promise<number> {
   return page.evaluate(
     ({ view, level, n }) => {
@@ -79,7 +81,7 @@ async function frameCost(page: Page, view: string, level: number, n = 20): Promi
         gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
         ms.push(performance.now() - t0);
       }
-      return ms.sort((a, b) => a - b)[n >> 1];
+      return Math.min(...ms);
     },
     { view, level, n },
   );

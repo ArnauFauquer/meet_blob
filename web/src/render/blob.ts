@@ -69,6 +69,7 @@ export class BlobRenderer {
         uFlow: { value: 0 },
         uPhase: { value: 0 },
         uColor: { value: new Vector3() },
+        uLava: { value: new Vector3() },
         uAmp: { value: 0 },
         uBreath: { value: 0 },
         uLevel: { value: 0 },
@@ -180,7 +181,10 @@ export class BlobRenderer {
     const target = lookFor(view);
     const k = 1 - Math.exp(-dt / EASE_S);
     const c = this.cur;
-    for (let i = 0; i < 3; i++) c.color[i] += (target.color[i] - c.color[i]) * k;
+    for (let i = 0; i < 3; i++) {
+      c.color[i] += (target.color[i] - c.color[i]) * k;
+      c.lava[i] += (target.lava[i] - c.lava[i]) * k;
+    }
     for (const key of ['speed', 'amp', 'breath', 'breathHz', 'levelGain', 'glow', 'bright'] as const) {
       c[key] += (target[key] - c[key]) * k;
     }
@@ -194,6 +198,7 @@ export class BlobRenderer {
     u.uFlow.value += dt * c.speed;
     u.uPhase.value = (u.uPhase.value + dt * c.breathHz * 2 * Math.PI) % (2 * Math.PI);
     (u.uColor.value as Vector3).set(c.color[0], c.color[1], c.color[2]);
+    (u.uLava.value as Vector3).set(c.lava[0], c.lava[1], c.lava[2]);
     u.uAmp.value = c.amp;
     u.uBreath.value = c.breath;
     u.uLevel.value = this.level;
