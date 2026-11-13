@@ -1,8 +1,8 @@
-# Wake word: training "hey blob" and dropping it in
+# Wake word: the "hey blob" model
 
-The page ships with the stock openWakeWord model **"hey jarvis"** (`hey_jarvis_v0.1.onnx`). Say
-"hey jarvis" to start a turn. The design phrase "hey blob" needs a custom model. This page says
-what was tried on the development machine, and exactly how to train and install a real one.
+The page listens for **"hey blob"** with `web/public/models/hey_blob.onnx`, an openWakeWord model
+trained for this project on 2026-11-13 on the author's Windows PC (RTX 3080). This page says how
+the page loads it, how well it does, how it was trained, and how to retrain it.
 
 ## How the page loads a wake model
 
@@ -10,91 +10,117 @@ what was tried on the development machine, and exactly how to train and install 
 *   `web/public/models/wake.json` picks the model:
 
     ```json
-    { "model": "hey_jarvis_v0.1.onnx", "phrase": "hey jarvis", "threshold": 0.5 }
+    { "model": "hey_blob.onnx", "phrase": "hey blob", "threshold": 0.5 }
     ```
 
 *   The pipeline is openWakeWord's: `melspectrogram.onnx` and `embedding_model.onnx` (shared,
     keep them) feed a wake model whose input is `[1, 16, 96]` (16 embeddings of 96 values, 1.28 s)
-    and whose output is one score `[1, 1]`. Any model trained with openWakeWord's training code
-    has this shape. Tensor names are read from the file, so they do not matter.
-*   `phrase` is shown in the diagnostics view only. `threshold` is the score that fires (0.5 is
-    openWakeWord's default; raise it if there are false accepts, lower it if there are misses).
-*   Only a device with `"wake": true` in `config/devices.json` loads any of this.
+    and whose output is one score `[1, 1]`. Tensor names are read from the file, so they do not
+    matter.
+*   `phrase` is shown in the diagnostics view only. `threshold` is the score that fires. Raise it
+    if there are false accepts, lower it (0.3 to 0.4) if there are misses.
+*   A device with `"wake": false` in `config/devices.json` loads none of this.
+*   The stock `hey_jarvis_v0.1.onnx` stays in the folder: the pipeline unit test uses it, and
+    pointing `wake.json` back at it (`"phrase": "hey jarvis"`) is the fallback.
 
-To install a model: copy `hey_blob.onnx` to `web/public/models/`, set
-`{"model": "hey_blob.onnx", "phrase": "hey blob", "threshold": 0.5}` in `wake.json`, add its
-licence line to `web/public/models/README.md`, rebuild the page (`npm run build`, or the
-container image), and check the score in the diagnostics view (long press) while saying the
+To install another model: copy it to `web/public/models/`, point `wake.json` at it, add its
+licence line and SHA-256 to `web/public/models/README.md`, rebuild the page (`npm run build`, or
+the container image), and check the score in the diagnostics view (long press) while saying the
 phrase. No code change is needed.
 
-## Train a real "hey blob" model (recommended path)
+## How well it does (synthetic speech only)
 
-openWakeWord trains a small model on top of its frozen embedding model, from fully synthetic
-positive clips plus large negative datasets. The official recipe:
+Max score per clip through the same pipeline as the page (`tools/wake-word/eval_model.py`),
+threshold 0.5:
 
-1.  Use openWakeWord's notebook `notebooks/automatic_model_training.ipynb`
-    (https://github.com/dscripka/openWakeWord). It runs on Google Colab with a GPU; locally it
-    needs an NVIDIA GPU with CUDA for the clip generation to finish in hours rather than days.
-2.  In its config set `target_phrase: ["hey blob"]` and a model name `hey_blob`. Add the
-    Spanish and Catalan ways the household says it if needed (for example `["hey blob", "ei blob"]`).
-    Keep the default negative phrases and add the near misses that matter here:
-    "hey bob", "hey blog", "a blob", "oye bob", "hey Rob".
-3.  It downloads what it needs: `piper-sample-generator` with the LibriTTS-R Piper model
-    (thousands of synthetic speakers), room impulse responses, background noise and music
-    (AudioSet, FMA), and the precomputed negative features
-    `openwakeword_features_ACAV100M_2000_hrs_16bit.npy` (about 2000 hours, about 17 GB) and
-    `validation_set_features.npy`. Budget about 40 GB of disk.
-4.  Defaults that work: `n_samples: 50000` positive clips, `steps: 50000`,
-    `target_false_positives_per_hour: 0.2`. It writes `hey_blob.onnx` (and a tflite file, not
-    needed here).
-5.  Test before trusting it (design SC2): fewer than 1 false accept per day over 3 days with
-    the TV on, and fewer than 2 misses in 10 attempts, on the tablet. Record the threshold and
-    results in `docs/spikes/tablet-test.md`.
-
-Licence: a model you train is yours. The training data the notebook downloads has mixed
-licences (some non-commercial), which matches openWakeWord's own CC BY-NC-SA 4.0 for its
-release models; fine for a private home assistant.
-
-Alternative engine: microWakeWord (design, Alternative H3) has its own training recipe and runs
-on TFLite; the page does not support it, and switching would mean a new worker pipeline.
-
-## What was tried on this machine (CPU only, one hour): not good enough, not shipped
-
-The machine has 12 CPU cores, 15 GB of RAM and no GPU. The official recipe above needs the
-Piper LibriTTS generator (slow on a CPU for 50 000 clips), PyTorch and about 17 GB of negative
-features, which does not fit a one-hour box. A reduced attempt was made instead, in about
-35 minutes of work (scripts kept outside the repository):
-
-1.  **Positives:** Kokoro (the backend's speech model) said "Hey Blob." in 4 spellings with
-    31 English voices and 3 Spanish voices at speeds 0.85, 1.0 and 1.2, each augmented 3 times
-    (gain from -12 to +3 dB, white noise from -60 to -30 dB). 5 voices were held out for testing.
-2.  **Negatives:** the same voices saying 25 other phrases, including near misses ("hey Bob",
-    "hey blog", "a blob", "oye Bob", "hey Jarvis") and Spanish sentences, plus 200 noise-only
-    clips and the silence around the positives.
-3.  **Features:** the stock `melspectrogram.onnx` and `embedding_model.onnx`, with the same
-    16 x 96 windows the page computes. 3 276 positive and 23 893 negative training windows;
-    11 minutes on the CPU.
-4.  **Model:** an openWakeWord-style head (1536 to 32 to 32 to 1, sigmoid) trained in numpy
-    (Adam, 40 epochs, seconds) and exported to ONNX with the stock input shape `[1, 16, 96]`.
-    It ran through the Python reference of the page's pipeline (same maths); it was not loaded
-    in the page itself.
-
-Results on clips it never saw:
-
-| Test | Fired (score ≥ 0.5) |
+| Test | Fired |
 | --- | --- |
-| "Hey Blob." by 5 held-out voices | 5 of 5 |
-| near misses ("hey Bob", "hey blog", "a blob", "hey Rob", "hey globe", "oye Bob", "hey, block that"), 3 voices | **9 of 21** |
-| ordinary sentences it never heard ("the bulb is broken", "bring the bottle", a Spanish sentence...), 4 voices | **7 of 24** |
-| the e2e clips "Hey Jarvis. What time is it?" and the question clip | 0 of 2 |
+| "hey blob", new Piper clips not used in training (300) | 79 % (84 % at 0.3) |
+| "hey blob", Piper validation clips, no noise (2000) | 93 % |
+| "hey blob", **Kokoro** (another TTS engine), 31 voices x 2 speeds | 52 % (61 % at 0.3) |
+| of which American voices (af, am) | 29 of 40 |
+| of which British voices (bf, bm) | 1 of 16 |
+| of which Spanish voices (ef, em) | 2 of 6 |
+| "hey blob, what time is it?", Kokoro | 63 % |
+| "hey blog" (Piper / Kokoro) | **75 % / 44 %** |
+| "hey bob", "a blob", "hey rob", "hey globe" (Piper / Kokoro) | 0 to 10 % |
+| "hey bulb", "oye bob", "hey jarvis", "blob", ordinary sentences | 0 % |
+| openWakeWord's 11 h validation set (speech, noise, music) | 0.0 false accepts per hour |
 
-The false-accept scores are 1.0, so no threshold fixes them. With a few thousand negative
-windows from one TTS engine the head learns "a short English phrase in a Kokoro voice", not
-"hey blob". It would fire many times a day on the TV. **It was not shipped.** The page ships
-with "hey jarvis" and the pipeline above; a real model needs the official recipe (large
-negative features, many synthetic speakers, real noise), run on a GPU or on Colab.
+What this means:
 
-What the attempt does show: a head exported to `[1, 16, 96] -> [1, 1]` with its own tensor
-names runs through the same feature pipeline, and the page reads tensor names from the
-session, so installing a properly trained `hey_blob.onnx` should only need the `wake.json`
-edit described above (not verified in the page with a custom file).
+*   It does not fire on the near misses that broke the earlier CPU attempt, except "hey blog",
+    which sounds almost the same.
+*   It hears American "blob" far better than British "blob". The training voices (Piper
+    LibriTTS-R) are American. The household speaks Spanish and Catalan, and their "o" is closer to
+    the British vowel, so **real recall may be low**. This is the main risk.
+*   It has not heard a real voice. The design test (SC2) still applies: on the tablet, fewer than
+    1 false accept per day over 3 days with the TV on, and fewer than 2 misses in 10 attempts.
+    Record the threshold and results in `docs/spikes/tablet-test.md`.
+*   The e2e fixture `web/e2e/fixtures/hey-blob.wav` uses Kokoro's `am_puck` (score 0.93). The
+    voice of the other fixtures, `am_adam`, scores 0.30 at normal speed and does not fire.
+
+If misses are the problem, retrain with extra positives in the household's accent: Kokoro's
+British and Spanish voices (`tools/wake-word/kokoro_clips.py`), or recordings of the household
+saying the phrase, added to `positive_train` before `--augment_clips`. Recordings of real voices
+stay outside the repository (`.gitignore` excludes `**/clips/`).
+
+## How it was trained
+
+The official openWakeWord recipe (`train.py` with a YAML config; the
+`notebooks/automatic_model_training.ipynb` notebook runs the same steps), run natively on Windows
+in a folder outside this repository (`../blob-wakeword`). Everything needed to repeat it is in
+`tools/wake-word/`.
+
+| Item | Value |
+| --- | --- |
+| openWakeWord | https://github.com/dscripka/openWakeWord at `368c037`, plus `openwakeword-windows.patch` |
+| Synthetic speech | https://github.com/rhasspy/piper-sample-generator at tag `v2.0.0` (the layout `train.py` imports), plus `piper-sample-generator-v2.patch` and `piper_phonemize.py`, with `en_US-libritts_r-medium.pt` from its v2.0.0 release (about 900 speakers) |
+| Python | 3.10 venv; `torch==2.7.1` and `torchaudio==2.7.1` (cu126), `onnxruntime-gpu==1.22.0`, `numpy<2`, `pyarrow<15`, `setuptools<70`, the training pins from the notebook (`speechbrain==0.5.14`, `audiomentations==0.33.0`, `torch-audiomentations==0.11.0`, `datasets==2.14.6`, ...), `piper-tts==1.3.0`, `webrtcvad-wheels`. No TensorFlow: only the `.tflite` export needs it |
+| Config | `tools/wake-word/hey_blob.yaml`: "hey blob"; 11 custom negatives ("hey bob", "hey blog", "a blob", "hey rob", ...); 50 000 positive and 50 000 adversarial clips (+ 2 000 each for validation); 50 000 steps; target 0.2 false accepts per hour |
+| Data (about 25 GB) | `openwakeword_features_ACAV100M_2000_hrs_16bit.npy` (17 GB) and `validation_set_features.npy` from huggingface.co/datasets/davidscripka/openwakeword_features; 270 MIT room impulse responses; 3 000 AudioSet clips (6 balanced-train parquet parts, about 8 h) as background noise (`get_audio_data.py`) |
+| Time on the RTX 3080 | clip generation about 15 min, augmentation and features about 15 min, training about 10 min |
+| Result | training's own report: accuracy 0.72, recall 0.44 (on heavily augmented clips), 0.0 false accepts per hour |
+
+Windows fixes (the notebook says "linux only"):
+
+*   `piper-phonemize` has no Windows wheels. `piper_phonemize.py` is a stand-in that calls the
+    espeak-ng bundled in `piper-tts` 1.3. Drop it next to `generate_samples.py`.
+*   PyTorch 2.6+ loads `.pt` files with `weights_only=True`. The Piper generator is a pickled
+    module, so `generate_samples.py` needs `weights_only=False`. That runs code from the file:
+    only use the official rhasspy release file.
+*   `train.py` hands a generator and lambdas to a multi-process `DataLoader`. Windows spawns
+    processes and cannot pickle them, so the patch uses `num_workers=0` on Windows.
+*   `trim_mmap` deletes and renames a memory-mapped file while it is still open, which Windows
+    refuses. The patch closes the maps first (and fixes `.strip(".npy")`, which strips
+    characters, not the suffix).
+*   AudioSet on Hugging Face is now parquet, not `.tar`; `get_audio_data.py` reads the parquet.
+*   `--convert_to_tflite` defaults to the string `"False"`, which is true, so `train.py` always
+    tries the tflite export last and fails without TensorFlow. The `.onnx` is already written by
+    then; ignore that error.
+*   Keep `kokoro-onnx` in its own venv: it upgrades numpy to 2.x and installs the CPU
+    onnxruntime over the GPU one.
+
+To retrain, from `../blob-wakeword` with the patches applied:
+
+```
+.venv/Scripts/python openWakeWord/openwakeword/train.py --training_config hey_blob.yaml --generate_clips
+.venv/Scripts/python openWakeWord/openwakeword/train.py --training_config hey_blob.yaml --augment_clips
+.venv/Scripts/python openWakeWord/openwakeword/train.py --training_config hey_blob.yaml --train_model
+```
+
+Each step skips work already on disk. Delete `output/hey_blob/*.npy` (or pass `--overwrite`)
+to recompute features after changing the clips.
+
+Licence: the model is the author's own. Its training data has mixed licences (some
+non-commercial), which matches openWakeWord's own CC BY-NC-SA 4.0 for its release models; fine
+for a private home assistant.
+
+## Earlier attempt (CPU only, 2026-11-12): not shipped
+
+On a 12-core machine with no GPU, a reduced attempt used Kokoro clips (34 voices) as positives,
+a few thousand negative windows from the same engine, and a small head trained in numpy. It
+fired on 9 of 21 near misses and 7 of 24 ordinary sentences, with scores of 1.0: it had learned
+"a short English phrase in a Kokoro voice", not "hey blob". The fix was the official recipe
+above: about 2 000 hours of negative features, about 900 synthetic speakers, real noise and
+room acoustics.

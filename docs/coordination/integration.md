@@ -8,8 +8,8 @@ unit and mock-backend suites that the implementation sessions ran (their reports
 
 - Backend (`backend/`): slices S1 (tap-to-talk), S2 (tokens, device config, static page), S3 (wake
   message, follow-up flag) and S4 (alerts API, scheduler, timer rule, `alert_read`/`alert_ack`).
-- Page (`web/`): S1/S2 (states, taps, capture, playback, PWA), S3 (voice-activity detector, wake word with
-  the stock phrase "hey jarvis", follow-up listening), S4 (alert shapes, morph, chime, quiet hours), and the
+- Page (`web/`): S1/S2 (states, taps, capture, playback, PWA), S3 (voice-activity detector, wake word "hey
+  blob" with a model trained for it, follow-up listening), S4 (alert shapes, morph, chime, quiet hours), and the
   liquid-metal look.
 - Deployment: `Dockerfile`, `.github/workflows/{ci,image}.yml`, Helm chart, Argo application, Terraform
   secret and a Hermes NetworkPolicy in the `home_lab` repo, branch `feat/blob` (not merged, not applied).
@@ -42,10 +42,10 @@ unit and mock-backend suites that the implementation sessions ran (their reports
   The accuracy of `large-v3` on a real Catalan speaker is unmeasured. In one browser run the spoken-timer
   clip was transcribed as "Pon" only; sent straight over the WebSocket the same clip was transcribed in full.
   The cause is probably how Chromium's fake microphone loops a short file, but it was not investigated.
-- **Wake phrase "hey blob"**: not delivered. A model trained on this CPU-only machine fired on too many near
-  misses, so the page ships the stock "hey jarvis" model (licence CC BY-NC-SA, fine for personal use). See
-  `docs/wake-word-training.md` for how to train and drop in "hey blob". The false-accept rate with a TV on
-  (success criterion SC2) was not measured.
+- **Wake phrase "hey blob"**: delivered 2026-11-13 as `hey_blob.onnx`, trained with openWakeWord's recipe on
+  the author's RTX 3080. On synthetic speech it fires for American voices (70–80 %) much more than for
+  British ones (0–30 %), and on "hey blog"; it has not heard a real voice yet. See
+  `docs/wake-word-training.md`. The false-accept rate with a TV on (success criterion SC2) was not measured.
 - **Audible output**: headless Chromium mutes audio; playback was checked through started audio sources and the
   playback-level uniform, not by ear.
 - **Real GPU frame rate and the look in motion**: judged from stills and contact sheets only.

@@ -8,7 +8,7 @@ export interface WakeConfig {
   phrase: string;
   threshold: number;
 }
-export const DEFAULT_WAKE: WakeConfig = { model: 'hey_jarvis_v0.1.onnx', phrase: 'hey jarvis', threshold: 0.5 };
+export const DEFAULT_WAKE: WakeConfig = { model: 'hey_blob.onnx', phrase: 'hey blob', threshold: 0.5 };
 export const MODELS_BASE = '/models/';
 
 export async function loadWakeConfig(): Promise<WakeConfig> {

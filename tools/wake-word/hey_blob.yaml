@@ -1,0 +1,47 @@
+# openWakeWord training config for Blob's wake word. Run from this folder:
+#   .venv/Scripts/python openWakeWord/openwakeword/train.py --training_config hey_blob.yaml --generate_clips
+#   ... --augment_clips
+#   ... --train_model
+model_name: "hey_blob"
+target_phrase:
+  - "hey blob"
+custom_negative_phrases:
+  - "hey bob"
+  - "hey blog"
+  - "a blob"
+  - "hey rob"
+  - "hey globe"
+  - "hey bulb"
+  - "hey bub"
+  - "oye bob"
+  - "hey block"
+  - "the blob"
+  - "hey jarvis"
+
+n_samples: 50000
+n_samples_val: 2000
+tts_batch_size: 64
+augmentation_batch_size: 16
+piper_sample_generator_path: "./piper-sample-generator-v2"
+output_dir: "./output"
+
+rir_paths:
+  - "./data/mit_rirs"
+background_paths:
+  - "./data/audioset_16k"
+background_paths_duplication_rate:
+  - 1
+false_positive_validation_data_path: "./data/validation_set_features.npy"
+augmentation_rounds: 1
+feature_data_files:
+  "ACAV100M_sample": "./data/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
+batch_n_per_class:
+  "ACAV100M_sample": 1024
+  "adversarial_negative": 50
+  "positive": 50
+
+model_type: "dnn"
+layer_size: 32
+steps: 50000
+max_negative_weight: 1500
+target_false_positives_per_hour: 0.2

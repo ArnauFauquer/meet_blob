@@ -134,7 +134,7 @@ npm run dev          # http://localhost:5173, proxies /ws and the HTTP endpoints
 npm run lint && npm run typecheck && npm test && npm run build   # build after the backend is merged: the page version comes from backend/blob/__init__.py
 ```
 
-Install a browser once with its token: open `https://<host>/#t=<DEVICE_TOKEN>&device=<name>`. The page stores both in `localStorage` and removes them from the address bar. Tap the blob to talk, tap again to send; tap while it thinks or speaks to cancel; long press opens diagnostics; tap an alert to hear it and clear it. On every device (wake is on by default; set `"wake": false` in `config/devices.json` to turn it off for one) the page also loads the wake-word and voice-activity models from `/models/` and listens for the phrase in `web/public/models/wake.json` (stock phrase "hey jarvis"; see `docs/wake-word-training.md` for "hey blob").
+Install a browser once with its token: open `https://<host>/#t=<DEVICE_TOKEN>&device=<name>`. The page stores both in `localStorage` and removes them from the address bar. Tap the blob to talk, tap again to send; tap while it thinks or speaks to cancel; long press opens diagnostics; tap an alert to hear it and clear it. On every device (wake is on by default; set `"wake": false` in `config/devices.json` to turn it off for one) the page also loads the wake-word and voice-activity models from `/models/` and listens for the phrase in `web/public/models/wake.json` ("hey blob", a model trained for this project; see `docs/wake-word-training.md`).
 
 End-to-end tests (Chromium headless, fake microphone, software GL):
 
