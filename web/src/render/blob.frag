@@ -14,7 +14,7 @@ uniform float uGlow;
 uniform float uBright;
 uniform float uFlash;   // short brightness flash (busy)
 uniform float uRadius;
-// S4: shape morph. Ids: 0 sphere; triangle and square come with alerts.
+// Shape morph. Ids (SHAPE in tables.ts): 0 sphere, 1 triangle, 2 square.
 uniform float uShapeA;
 uniform float uShapeB;
 uniform float uMix;
@@ -63,14 +63,43 @@ float sphereShape(vec3 p) {
   return d;
 }
 
+// Alert shapes (S4). Rounded triangular prism (timer) and rounded box (other
+// sources), facing the camera with a slow sway so the flat faces catch the
+// light. They pulse with the breathing radius.
+float sdTriPrism(vec3 p, vec2 h) {
+  vec3 q = abs(p);
+  return max(q.z - h.y, max(q.x * 0.866025 + p.y * 0.5, -p.y) - h.x * 0.5);
+}
+
+float sdRoundBox(vec3 p, vec3 b, float r) {
+  vec3 q = abs(p) - b + r;
+  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
+}
+
+float alertShape(vec3 p, float id) {
+  float s = radius() / uRadius;
+  p /= s;
+  float a = 0.35 * sin(uFlow * 0.6);
+  p.xz = mat2(cos(a), -sin(a), sin(a), cos(a)) * p.xz;
+  p.yz = mat2(0.98, -0.2, 0.2, 0.98) * p.yz;
+  float d = id < 1.5
+    ? sdTriPrism(p + vec3(0.0, 0.15, 0.0), vec2(0.6, 0.2)) - 0.12
+    : sdRoundBox(p, vec3(0.6, 0.6, 0.32), 0.14);
+  d += (noise(p * 2.0 + vec3(0.0, uFlow * 0.6, 0.0)) - 0.5) * 0.03; // liquid shimmer
+  return d * s;
+}
+
 float shape(vec3 p, float id) {
-  return sphereShape(p); // S4: triangle and square distance functions by id
+  if (id < 0.5) return sphereShape(p);
+  return alertShape(p, id);
 }
 
 float map(vec3 p) {
   float a = shape(p, uShapeA);
   if (uMix < 0.001) return a;
-  return mix(a, shape(p, uShapeB), uMix); // S4: march step shortened to about 0.7 while morphing
+  // A mix of two distance fields is not a true distance: scaling it by 0.875
+  // turns the usual 0.8 march step into about 0.7 while morphing.
+  return mix(a, shape(p, uShapeB), uMix) * 0.875;
 }
 
 vec3 normalAt(vec3 p) {
