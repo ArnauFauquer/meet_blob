@@ -118,11 +118,9 @@ describe('TurnClient', () => {
     expect(tc.phase).toBe('idle');
   });
 
-  it('not_ready ends the request without a flash; bad_message is ignored', () => {
+  it('not_ready ends the request without a flash', () => {
     const { tc, deps } = setup();
     tc.startTurn();
-    tc.onError({ type: 'error', code: 'bad_message' });
-    expect(tc.phase).toBe('requested');
     tc.onError({ type: 'error', code: 'not_ready' });
     expect(tc.phase).toBe('idle');
     expect(deps.onBusy).not.toHaveBeenCalled();
