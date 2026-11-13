@@ -11,16 +11,24 @@ import {
 } from 'three';
 import fragmentShader from './blob.frag?raw';
 import vertexShader from './blob.vert?raw';
-import { lookFor, type Look } from './tables';
+import { SHAPE, alertLook, alertShape, lookFor, type Look } from './tables';
+import { morphMix, stepMorph, type Morph } from './morph';
+import type { AlertItem } from '../protocol';
 import type { View } from '../state';
 
 export const RENDER_SCALE = 0.75;
-const CALM_FRAME_MS = 1000 / 30; // idle (and error/offline) is capped at 30 fps
+const CALM_FRAME_MS = 1000 / 30; // idle (and error, offline, alert) is capped at 30 fps
 const EASE_S = 0.6; // time constant of the state crossfade
 
 export interface FrameInput {
   view: View;
   level: number; // mic level while listening, playback level while speaking
+  alert?: Pick<AlertItem, 'source' | 'urgency'> | null; // the top alert, drawn when view is 'alert'
+}
+
+function targetOf(i: FrameInput): { look: Look; shape: number } {
+  if (i.view === 'alert' && i.alert) return { look: alertLook(i.alert.urgency), shape: alertShape(i.alert.source) };
+  return { look: lookFor(i.view === 'alert' ? 'idle' : i.view), shape: SHAPE.sphere };
 }
 
 // One fullscreen quad with the blob shader. The caller gives the view and the
@@ -35,6 +43,7 @@ export class BlobRenderer {
   private readonly camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private readonly material: RawShaderMaterial;
   private readonly cur: Look;
+  readonly morph: Morph;
   private readonly input: () => FrameInput;
   private last = 0;
   private lastDraw = 0;
@@ -45,7 +54,9 @@ export class BlobRenderer {
   constructor(canvas: HTMLCanvasElement, input: () => FrameInput, onLost: (lost: boolean) => void) {
     this.canvas = canvas;
     this.input = input;
-    this.cur = structuredClone(lookFor(input().view));
+    const first = targetOf(input());
+    this.cur = structuredClone(first.look);
+    this.morph = { a: first.shape, b: first.shape, t: 0 };
     this.renderer = new WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'low-power' });
     this.material = new RawShaderMaterial({
       glslVersion: GLSL3,
@@ -65,8 +76,8 @@ export class BlobRenderer {
         uBright: { value: 0 },
         uFlash: { value: 0 },
         uRadius: { value: 0.78 },
-        uShapeA: { value: 0 },
-        uShapeB: { value: 0 },
+        uShapeA: { value: first.shape },
+        uShapeB: { value: first.shape },
         uMix: { value: 0 },
       },
     });
@@ -114,14 +125,16 @@ export class BlobRenderer {
 
   private frame(now: number): void {
     if (this.lost) return;
-    const { view, level } = this.input();
-    const calm = view === 'idle' || view === 'error' || view === 'offline';
+    const fi = this.input();
+    const { view, level } = fi;
+    const calm = view === 'idle' || view === 'error' || view === 'offline' || view === 'alert';
     if (calm && now - this.lastDraw < CALM_FRAME_MS - 2) return;
     this.lastDraw = now;
     const dt = Math.min(0.1, this.last ? (now - this.last) / 1000 : 0);
     this.last = now;
 
-    const target = lookFor(view);
+    const { look: target, shape } = targetOf(fi);
+    stepMorph(this.morph, shape, dt);
     const k = 1 - Math.exp(-dt / EASE_S);
     const c = this.cur;
     for (let i = 0; i < 3; i++) c.color[i] += (target.color[i] - c.color[i]) * k;
@@ -144,6 +157,9 @@ export class BlobRenderer {
     u.uGlow.value = c.glow;
     u.uBright.value = c.bright;
     u.uFlash.value = this.flashT;
+    u.uShapeA.value = this.morph.a;
+    u.uShapeB.value = this.morph.b;
+    u.uMix.value = morphMix(this.morph);
 
     this.frameMs = dt * 1000;
     this.renderer.render(this.scene, this.camera);

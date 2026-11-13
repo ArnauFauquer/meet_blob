@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 export const TOKEN = process.env.BLOB_TOKEN ?? 'test-token';
 export const external = !!process.env.BLOB_URL;
@@ -110,3 +110,40 @@ export async function speak(page: Page, ms = 1500): Promise<number> {
   await waitFor(page, (l) => sent(l, 'utterance').length > 0, 'utterance sent');
   return st!.data!.turn as number;
 }
+
+// Alerts (S4): POST /alerts needs ALERT_TOKEN. The mock's is fixed; a real
+// backend needs BLOB_ALERT_TOKEN, else the alert flows are skipped.
+export const ALERT_TOKEN = process.env.BLOB_ALERT_TOKEN ?? (external ? '' : 'alert-token');
+
+export function needsAlerts(): void {
+  test.skip(!ALERT_TOKEN, 'set BLOB_ALERT_TOKEN to run the alert flows against a real backend');
+}
+
+// Creates alerts with unique keys and deletes them all in cleanup().
+export function alertSource(request: APIRequestContext) {
+  const keys: string[] = [];
+  const headers = { Authorization: `Bearer ${ALERT_TOKEN}` };
+  return {
+    // `name` becomes a unique key, unless `key` is given (an update of that alert).
+    async post(name: string, body: { source: string; urgency?: 'info' | 'urgent'; text?: string }, key = `e2e-${name}-${Date.now()}`): Promise<string> {
+      const r = await request.post('/alerts', { headers, data: { key, text: `Alert ${name}.`, lang: 'en', ...body } });
+      expect(r.status(), `POST /alerts ${key}`).toBeLessThan(300);
+      keys.push(key);
+      return key;
+    },
+    async del(key: string): Promise<void> {
+      expect((await request.delete(`/alerts/${key}`, { headers })).status()).toBe(204);
+    },
+    async cleanup(): Promise<void> {
+      for (const k of keys) await request.delete(`/alerts/${k}`, { headers });
+    },
+  };
+}
+
+export interface ShapeUniforms {
+  a: number;
+  b: number;
+  mix: number;
+  color: [number, number, number];
+}
+export const shape = (page: Page) => dbg<ShapeUniforms | null>(page, 'shape');

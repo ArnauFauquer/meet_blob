@@ -2,6 +2,10 @@ import type { Recording } from './audio/pcm';
 import type { ClientMessage, ErrorMsg, StateMsg, TurnDoneMsg } from './protocol';
 import { PCM_RATE } from './protocol';
 import type { TurnPhase } from './taps';
+import type { Vad, VadEnd } from './vad';
+
+// How a turn was started: a tap, the wake word, or the follow-up window.
+export type TurnKind = 'tap' | 'wake' | 'followup';
 
 export interface Mic {
   start(onCap: () => void): Promise<void>;
@@ -16,14 +20,21 @@ export interface TurnDeps {
   onTurn(turn: number): void; // this page learned its turn id
   onMicDenied(): void;
   onBusy(): void;
+  // Hands-free devices (wake=true): the VAD ends the utterance, with these limits in ms.
+  vad?: Vad;
+  noSpeechMs?: () => { listen: number; followup: number };
+  onListenEnd?: (kind: TurnKind) => void; // the listening phase ended (any reason)
 }
 
 // The client side of one turn (design: Turn pipeline, entry 48).
-// tap -> wait for the first `state` listening with a turn id -> open the mic
-// -> stop tap or 15 s cap -> utterance + PCM -> wait for turn_done.
+// tap or wake -> wait for the first `state` listening with a turn id -> open
+// the mic -> stop tap, VAD end or 15 s cap -> utterance + PCM -> wait for
+// turn_done. When the VAD hears no speech within its limit, a zero-length
+// utterance (dur_ms 0, no binary frame) is sent instead.
 export class TurnClient {
   phase: TurnPhase = 'idle';
   turn: number | null = null;
+  kind: TurnKind = 'tap';
   private capTimer: ReturnType<typeof setTimeout> | undefined;
   private micOpening: Promise<void> | null = null;
   private readonly d: TurnDeps;
@@ -32,9 +43,13 @@ export class TurnClient {
     this.d = deps;
   }
 
-  startTurn(): void {
-    if (this.phase !== 'idle') return;
-    if (this.d.send({ type: 'tap' })) this.phase = 'requested';
+  startTurn(kind: TurnKind = 'tap'): boolean {
+    if (this.phase !== 'idle') return false;
+    const msg: ClientMessage = kind === 'tap' ? { type: 'tap' } : { type: 'wake', followup: kind === 'followup' };
+    if (!this.d.send(msg)) return false;
+    this.phase = 'requested';
+    this.kind = kind;
+    return true;
   }
 
   onState(m: Pick<StateMsg, 'conv' | 'turn'>): void {
@@ -51,8 +66,13 @@ export class TurnClient {
 
   onError(m: ErrorMsg): void {
     // busy or not_ready answer our tap. A state listening may have come first
-    // (another device's turn), so a mic opened for it is closed again.
-    if (m.code === 'bad_message') return;
+    // (another device's turn), so a mic opened for it is closed again. A
+    // bad_message while requested is a refused wake; any other is ignored
+    // (for example a cancel for a turn that already ended).
+    if (m.code === 'bad_message') {
+      if (this.phase === 'requested') this.reset();
+      return;
+    }
     if (this.phase === 'requested' || this.phase === 'listening') {
       this.reset();
       if (m.code === 'busy') this.d.onBusy();
@@ -67,14 +87,13 @@ export class TurnClient {
   async sendUtterance(): Promise<void> {
     if (this.phase !== 'listening' || this.turn === null) return;
     const turn = this.turn;
-    this.phase = 'thinking';
-    clearTimeout(this.capTimer);
+    this.leaveListening();
     try {
       await this.micOpening;
     } catch {
       return; // denial already handled
     }
-    if (this.turn !== turn || this.phase !== 'thinking') return;
+    if (this.turn !== turn || (this.phase as TurnPhase) !== 'thinking') return;
     const rec = this.d.mic.stop();
     this.d.send(
       {
@@ -89,6 +108,21 @@ export class TurnClient {
     );
   }
 
+  // The VAD heard no speech within its limit: zero-length utterance, no frame.
+  async sendNoSpeech(): Promise<void> {
+    if (this.phase !== 'listening' || this.turn === null) return;
+    const turn = this.turn;
+    this.leaveListening();
+    try {
+      await this.micOpening;
+    } catch {
+      return;
+    }
+    if (this.turn !== turn || (this.phase as TurnPhase) !== 'thinking') return;
+    this.d.mic.close();
+    this.d.send({ type: 'utterance', turn, format: 'pcm_s16le', rate: PCM_RATE, dur_ms: 0, tail_silence_ms: 0 });
+  }
+
   // Thinking or speaking tap. The phase stays until turn_done arrives.
   cancel(): void {
     if (this.turn === null || this.phase === 'idle') {
@@ -97,21 +131,38 @@ export class TurnClient {
       return;
     }
     this.d.mic.close();
-    clearTimeout(this.capTimer);
+    if (this.phase === 'listening') this.leaveListening();
     this.d.send({ type: 'cancel', turn: this.turn });
     this.phase = 'thinking';
   }
 
   // Socket dropped or the turn ended: close the mic, forget the phase.
   reset(): void {
+    if (this.phase === 'listening' || this.phase === 'requested') this.leaveListening();
     clearTimeout(this.capTimer);
     this.d.mic.close();
     this.micOpening = null;
     this.phase = 'idle';
   }
 
+  private leaveListening(): void {
+    this.phase = 'thinking';
+    clearTimeout(this.capTimer);
+    this.d.vad?.stop();
+    this.d.onListenEnd?.(this.kind);
+  }
+
+  private onVadEnd(end: VadEnd): void {
+    if (end === 'no_speech') void this.sendNoSpeech();
+    else void this.sendUtterance();
+  }
+
   private openMic(turn: number): void {
     this.capTimer = setTimeout(() => void this.sendUtterance(), this.d.capMs);
+    if (this.d.vad) {
+      const lim = this.d.noSpeechMs?.() ?? { listen: 8000, followup: 6000 };
+      this.d.vad.start({ noSpeechMs: this.kind === 'followup' ? lim.followup : lim.listen }, (e) => this.onVadEnd(e));
+    }
     const opening = this.d.mic.start(() => void this.sendUtterance());
     this.micOpening = opening;
     opening.then(

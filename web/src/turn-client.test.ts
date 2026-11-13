@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TurnClient, type Mic, type TurnDeps } from './turn-client';
 import type { ClientMessage } from './protocol';
 import type { Recording } from './audio/pcm';
+import type { EndpointLimits, Vad, VadEnd } from './vad';
 
 const CAP = 15_000;
 
@@ -118,11 +119,9 @@ describe('TurnClient', () => {
     expect(tc.phase).toBe('idle');
   });
 
-  it('not_ready ends the request without a flash; bad_message is ignored', () => {
+  it('not_ready ends the request without a flash', () => {
     const { tc, deps } = setup();
     tc.startTurn();
-    tc.onError({ type: 'error', code: 'bad_message' });
-    expect(tc.phase).toBe('requested');
     tc.onError({ type: 'error', code: 'not_ready' });
     expect(tc.phase).toBe('idle');
     expect(deps.onBusy).not.toHaveBeenCalled();
@@ -177,5 +176,97 @@ describe('TurnClient', () => {
     deps.send = () => false;
     tc.startTurn();
     expect(tc.phase).toBe('idle');
+  });
+});
+
+describe('TurnClient hands-free (S3)', () => {
+  function handsFree() {
+    const t = setup();
+    let end: (e: VadEnd) => void = () => {};
+    const starts: EndpointLimits[] = [];
+    const vad = {
+      start: vi.fn((lim: EndpointLimits, cb: (e: VadEnd) => void) => {
+        starts.push(lim);
+        end = cb;
+      }),
+      stop: vi.fn(),
+    } satisfies Vad;
+    t.deps.vad = vad;
+    t.deps.noSpeechMs = () => ({ listen: 8000, followup: 6000 });
+    t.deps.onListenEnd = vi.fn();
+    return { ...t, vad, starts, end: (e: VadEnd) => end(e) };
+  }
+
+  it('the wake word sends wake{followup:false} and listens with listen_no_speech_s', async () => {
+    const { tc, sent, vad, starts } = handsFree();
+    expect(tc.startTurn('wake')).toBe(true);
+    expect(sent[0][0]).toEqual({ type: 'wake', followup: false });
+    tc.onState({ conv: 'listening', turn: 3 });
+    expect(vad.start).toHaveBeenCalledTimes(1);
+    expect(starts[0].noSpeechMs).toBe(8000);
+  });
+
+  it('follow-up: wake{followup:true}, listens 6 s without the wake word', () => {
+    const { tc, sent, starts, deps } = handsFree();
+    tc.startTurn('followup');
+    expect(sent[0][0]).toEqual({ type: 'wake', followup: true });
+    tc.onState({ conv: 'listening', turn: 4 });
+    expect(starts[0].noSpeechMs).toBe(6000);
+    tc.onError({ type: 'error', code: 'busy' });
+    expect(deps.onListenEnd).toHaveBeenCalledWith('followup');
+  });
+
+  it('VAD end of speech sends the utterance with its audio', async () => {
+    const { tc, sent, vad, end, rec } = handsFree();
+    tc.startTurn('wake');
+    tc.onState({ conv: 'listening', turn: 5 });
+    await vi.advanceTimersByTimeAsync(0);
+    end('speech_end');
+    await vi.advanceTimersByTimeAsync(0);
+    const [u, bin] = sent[1];
+    expect(u).toMatchObject({ type: 'utterance', turn: 5, dur_ms: rec.durMs });
+    expect(bin).toBeDefined();
+    expect(vad.stop).toHaveBeenCalled();
+    expect(tc.phase).toBe('thinking');
+  });
+
+  it('no speech within the limit: zero-length utterance, no binary frame', async () => {
+    const { tc, sent, mic, end, deps } = handsFree();
+    tc.startTurn('wake');
+    tc.onState({ conv: 'listening', turn: 6 });
+    await vi.advanceTimersByTimeAsync(0);
+    end('no_speech');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent[1]).toEqual([{ type: 'utterance', turn: 6, format: 'pcm_s16le', rate: 16000, dur_ms: 0, tail_silence_ms: 0 }, undefined]);
+    expect(mic.stop).not.toHaveBeenCalled();
+    expect(mic.close).toHaveBeenCalled();
+    expect(deps.onListenEnd).toHaveBeenCalledWith('wake');
+  });
+
+  it('a VAD end after a stop tap sends nothing more', async () => {
+    const { tc, sent, end } = handsFree();
+    tc.startTurn();
+    tc.onState({ conv: 'listening', turn: 7 });
+    await vi.advanceTimersByTimeAsync(0);
+    await tc.sendUtterance();
+    end('no_speech');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(types(sent)).toEqual(['tap', 'utterance']);
+  });
+
+  it('a refused wake (bad_message while requested) frees the client', () => {
+    const { tc } = handsFree();
+    tc.startTurn('wake');
+    tc.onError({ type: 'error', code: 'bad_message' });
+    expect(tc.phase).toBe('idle');
+    expect(tc.startTurn('wake')).toBe(true);
+  });
+
+  it('a tap-only device has no VAD: the stop tap or the 15 s cap ends listening', async () => {
+    const { tc, sent } = setup();
+    tc.startTurn();
+    tc.onState({ conv: 'listening', turn: 8 });
+    await vi.advanceTimersByTimeAsync(CAP);
+    expect(types(sent)).toEqual(['tap', 'utterance']);
   });
 });

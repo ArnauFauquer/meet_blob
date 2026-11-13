@@ -26,7 +26,7 @@ export const CLOSE_BAD_TOKEN = 4401;
 
 export const PCM_RATE = 16000;
 
-// S4 slot: alerts are typed so snapshots parse, but nothing draws them yet.
+// An active alert in snapshot.alerts[].
 export interface AlertItem {
   key: string;
   source: string;
@@ -59,7 +59,7 @@ export interface UtteranceMsg {
 export interface CancelMsg { type: 'cancel'; turn: number }
 export interface PingMsg { type: 'ping' }
 export interface ClientEventMsg { type: 'client_event'; kind: string; [extra: string]: unknown }
-// S3 and S4 messages, typed for the contract check only; the page does not send them yet.
+// S3 and S4 messages.
 export interface WakeMsg { type: 'wake'; followup: boolean }
 export interface AlertReadMsg { type: 'alert_read'; key: string }
 export interface AlertAckMsg { type: 'alert_ack'; key: string }

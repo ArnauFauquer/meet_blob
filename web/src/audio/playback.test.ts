@@ -130,4 +130,18 @@ describe('Playback', () => {
     await pb.play(wav(1), 1);
     expect(pb.level()).toBeCloseTo(0.4);
   });
+
+  it('an effect (chime) plays outside any turn: not playing, not stopped by stopAll', async () => {
+    const fetchMock = vi.fn(async () => new Response(wav(1)));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await pb.effect('/chime.wav')).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith('/chime.wav');
+    expect(pb.effects).toBe(1);
+    expect(pb.playing).toBe(false);
+    pb.stopAll();
+    expect(ctx.sources[0].stopped).toBe(false);
+    await pb.effect('/chime.wav');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
 });
