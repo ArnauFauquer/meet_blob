@@ -87,6 +87,72 @@ browser.
 9.  SC1: `uv run python scripts/timings_report.py --db /data/blob.db --last 20` reports the
     median and p90 of `sc1_ms` over 20 turns (about 6 s expected, no pass mark).
 
+<!-- PAGE S3/S4 (web session). Kept here, away from the backend's S3/S4 sections, so the two
+branches merge without a conflict; move it next to them after the merge if you like. -->
+
+## S3 and S4: page exit test (web)
+
+### Part A: page checks (run on 2026-11-13, headless Chromium, mock backend)
+
+No tablet, no GPU, no real backend. Commit: see `docs/coordination/reports/web-s3-s4.md`.
+From `web/` (`MOCK_PORT` only if 8787 is taken):
+
+1.  `npm run lint`, `npm run typecheck`, `npm run build`: no errors. `npm test`: 17 files, 136 tests passed.
+    S3/S4 unit tests: `state.test.ts` (alert precedence and hold), `taps.test.ts` (alert rows),
+    `alert-reader.test.ts`, `audio/chime.test.ts` (once per alert, quiet hours, held during a
+    turn), `render/tables.test.ts`, `render/morph.test.ts`, `wake/wake-gate.test.ts`,
+    `vad.test.ts` (limits with an injected clock), `turn-client.test.ts` (wake, follow-up,
+    zero-length utterance), `wake/oww.models.test.ts` (the real openWakeWord models on the
+    synthetic clip, in Node).
+2.  `MOCK_PORT=8797 npm run e2e`: 26 passed (2.5 min; 16 S1/S2 + 10 S3/S4). S3/S4 specs:
+    *   `alerts.spec.ts`: an alert appears (view `alert`, shape uniform 1 = triangle, green colour
+        uniform), an urgent calendar alert goes on top (morph seen with `0 < uMix < 1`, then
+        shape 2 = square, red), clearing returns to the sphere; ordering (urgent first, then
+        oldest); a tap sends `alert_read`, the returned WAV plays, `alert_ack` is sent only after
+        playback ends; an alert raised during a turn is held until the turn ends; the chime plays
+        once per alert on a `sound=true` device and is held during a turn; a failed synthesis
+        keeps the alert, plays the beep and sends no `alert_ack` (mock only).
+    *   `wake.spec.ts`: the fake microphone plays synthetic Kokoro "Hey Jarvis. What time is
+        it?"; the page sends `wake{followup:false}` (nothing sent before it, one shared
+        `getUserMedia`), the turn listens, the VAD sends the utterance without a stop tap.
+    *   `vad.spec.ts`: a tap turn ends by itself after the spoken question; `tail_silence_ms`
+        between 500 and 1500 ms.
+    *   `no-speech.spec.ts`: silence for 8 s sends `utterance{dur_ms: 0}` with no binary frame and
+        the turn ends `empty`; after a reply with `followup: true` the page sends
+        `wake{followup: true}` once playback ends and sends a zero-length utterance after 6 s
+        of silence (mock only).
+3.  Screenshots: `npm run screenshots` writes `docs/screenshots/alert-*.png` (timer triangle
+    info and urgent, calendar square, a frame mid-morph).
+
+Against a real backend (not run here):
+`BLOB_URL=http://host:port BLOB_TOKEN=<DEVICE_TOKEN> BLOB_ALERT_TOKEN=<ALERT_TOKEN> npx playwright test`.
+The backend must serve the freshly built `web/dist`, and `config/devices.json` must list the
+e2e devices: `hf-wake`, `hf-vad`, `hf-quiet` with `"wake": true`, `e2e-sound` with
+`"sound": true`, the others (`e2e-alert-*`) with both false. Mock-only flows (synthesis
+failure, follow-up) are skipped unless `BLOB_SCENARIOS=1`.
+
+### Part B: page on the tablet (not run; needs the tablet and the deployment)
+
+1.  Install with `#t=<DEVICE_TOKEN>&device=tablet` (`wake: true`, `sound: true`). Long press:
+    the diagnostics view shows `wake: {ready: true, ...}` and `vad`.
+2.  Say "hey jarvis" (or the phrase in `web/public/models/wake.json`): the blob flashes and
+    listens; ask a question and stop talking; the utterance is sent about 0.7 s after the end
+    of speech. Say nothing after the wake word: back to idle after 8 s (`turn_done empty`).
+3.  While a reply plays and for 0.5 s after it, saying the wake word does nothing.
+4.  A question back from Hermes (reply ends with `?`): the microphone reopens for 6 s without
+    the wake word; silence returns to idle; "sí" continues.
+5.  `curl` an urgent timer alert: within 1 s the blob morphs to a red triangle pulsing about
+    once a second and the chime plays once; an info calendar alert shows a green square
+    pulsing half as fast. A tap reads the alert and clears it on every screen.
+6.  Raise an alert during a turn: it shows, and chimes, only when the turn ends.
+7.  Set `QUIET_HOURS` to include the current time: no chime, the alert still shows.
+8.  On the desktop (`wake: false`, `sound: false`): no microphone until a tap, no chime, a
+    follow-up `tts` is ignored.
+9.  SC2 (with a trained "hey blob" model, see `docs/wake-word-training.md`): fewer than 1 false
+    accept per day over 3 days with the TV on, fewer than 2 misses in 10 attempts.
+
+<!-- /PAGE S3/S4 -->
+
 ## S2: tablet and deployment
 
 *To be written in S2.*
