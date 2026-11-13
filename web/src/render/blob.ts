@@ -11,7 +11,7 @@ import {
 } from 'three';
 import fragmentShader from './blob.frag?raw';
 import vertexShader from './blob.vert?raw';
-import { lookFor, type Look } from './tables';
+import { LOBE_COUNT, lobes, lookFor, type Look } from './tables';
 import type { View } from '../state';
 
 export const RENDER_SCALE = 0.75;
@@ -79,6 +79,7 @@ export class BlobRenderer {
         uShapeA: { value: 0 },
         uShapeB: { value: 0 },
         uMix: { value: 0 },
+        uLobes: { value: new Float32Array(LOBE_COUNT * 4) },
       },
     });
     this.scene.add(new Mesh(new PlaneGeometry(2, 2), this.material));
@@ -199,5 +200,6 @@ export class BlobRenderer {
     u.uGlow.value = c.glow;
     u.uBright.value = c.bright;
     u.uFlash.value = this.flashT;
+    lobes(u.uFlow.value as number, c.amp, u.uLobes.value as Float32Array);
   }
 }

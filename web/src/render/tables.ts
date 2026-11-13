@@ -26,3 +26,23 @@ export const STATE_LOOK: Record<LookRow, Look> = {
 export function lookFor(view: View): Look {
   return STATE_LOOK[view === 'offline' ? 'error' : view];
 }
+
+// Lava lobes for the shader (uLobes): centre in units of the blob radius and
+// radius, for flow time `flow` and displacement `amp`. Each lobe rises and
+// sinks on its own cycle (faster up, lazier down) and circles the vertical
+// axis; the golden-angle phases keep any two lobes out of step.
+export const LOBE_COUNT = 5;
+export function lobes(flow: number, amp: number, out: Float32Array): void {
+  const reach = 0.75 + amp * 3;
+  for (let i = 0; i < LOBE_COUNT; i++) {
+    const ph = i * 2.39996;
+    const t = flow * (0.8 + 0.13 * i) + ph;
+    const y = Math.sin(t + 0.45 * Math.sin(t)) * 0.52;
+    const a = ph * 1.3 + flow * (0.2 + 0.06 * i) * (i % 2 ? 1 : -1);
+    const rad = 0.34 + 0.1 * Math.sin(i * 1.7 + flow * 0.13);
+    out[i * 4] = Math.cos(a) * rad * reach;
+    out[i * 4 + 1] = y * reach;
+    out[i * 4 + 2] = Math.sin(a) * rad * reach;
+    out[i * 4 + 3] = 0.44 + 0.07 * Math.sin(t * 1.6 + i);
+  }
+}
