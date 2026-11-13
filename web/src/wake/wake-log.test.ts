@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { PeakTracker } from './wake-log';
+import { MicStats, PeakTracker } from './wake-log';
+
+describe('MicStats', () => {
+  it('counts blocks and reports the loudest sample in dBFS, then starts over', () => {
+    const m = new MicStats();
+    m.add(new Int16Array([0, 100, -3277]));
+    m.add(new Int16Array([16384, 0]));
+    expect(m.take()).toEqual({ frames: 2, peak_dbfs: -6 });
+    expect(m.take()).toEqual({ frames: 0, peak_dbfs: null });
+  });
+  it('all zeros is null (digital silence)', () => {
+    const m = new MicStats();
+    m.add(new Int16Array(320));
+    expect(m.take()).toEqual({ frames: 1, peak_dbfs: null });
+  });
+});
 
 describe('PeakTracker', () => {
   it('reports nothing for scores below the floor', () => {

@@ -11,6 +11,29 @@ export interface WakePeak {
   fired: boolean; // the peak reached the threshold
 }
 
+// Microphone health over a window (client_event `mic`): how many 20 ms blocks
+// arrived and how loud the loudest sample was, in dBFS (-Infinity reported as
+// null: digital silence, all zeros).
+export class MicStats {
+  private frames = 0;
+  private peak = 0;
+
+  add(pcm: Int16Array): void {
+    this.frames += 1;
+    for (let i = 0; i < pcm.length; i++) {
+      const a = Math.abs(pcm[i]);
+      if (a > this.peak) this.peak = a;
+    }
+  }
+
+  take(): { frames: number; peak_dbfs: number | null } {
+    const r = { frames: this.frames, peak_dbfs: this.peak > 0 ? Math.round(20 * Math.log10(this.peak / 32768) * 10) / 10 : null };
+    this.frames = 0;
+    this.peak = 0;
+    return r;
+  }
+}
+
 export class PeakTracker {
   private start: number | null = null;
   private peak = 0;

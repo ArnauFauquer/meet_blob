@@ -34,6 +34,11 @@ export class Capture implements Mic {
     return this.stream !== null;
   }
 
+  // The microphone track, for the mic log (muted, label, settings).
+  get track(): MediaStreamTrack | null {
+    return this.stream?.getAudioTracks()[0] ?? null;
+  }
+
   // Hands-free: open the one stream for good.
   async openShared(): Promise<void> {
     this.shared = true;
