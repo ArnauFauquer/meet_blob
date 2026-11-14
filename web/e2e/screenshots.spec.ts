@@ -32,6 +32,9 @@ for (const [w, h] of [
     await waitView(page, 'idle');
     await fullQuality(page); // before the page measures itself slow: no shader rebuild later
     await shot(page, 'idle', `idle-${w}x${h}`, 3000);
+    // The idle clock, 5 minutes later. It shows the time of the run.
+    await page.evaluate(() => (window as unknown as { blobDebug: { idleFor(ms: number): void } }).blobDebug.idleFor(5 * 60_000));
+    await shot(page, 'idle', `clock-${w}x${h}`, 3000);
     await tap(page);
     await shot(page, 'listening', `listening-${w}x${h}`, 2500);
     await tap(page);

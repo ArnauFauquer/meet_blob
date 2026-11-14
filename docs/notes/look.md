@@ -78,6 +78,19 @@ Where the time goes (removal tests, idle): lobes about 20 ms for three of them, 
 - The thin-film iridescence is barely visible: on purpose, but it adds little.
 - **Not verified:** real tablet GPU frame time, colour on a real display, and how the motion feels at full frame rate. SwiftShader draws about 8 to 10 frames per second here, so I judged motion only from the contact sheets.
 
+## Idle clock
+
+After 5 minutes of unbroken idle (`CLOCK_AFTER_MS`), the blob rests as a digital clock. Any other view (a tap, the wake word, an alert, an error) brings the blob back.
+
+| What | How |
+|---|---|
+| Body | Shape 3 (`clockShape()`): a wide pill of the same liquid metal, 1.3 times larger than the blob so it reads from across the room. It uses the same shape morph as the alerts (`uMix`, 0.8 s), so the sphere flows into the pill and back. On a narrow screen it shrinks to fit. |
+| Digits | `clockDist()`: HH:MM (24 h, local time) as seven-segment strokes, drawn like the face: a near white lava core over a dark patch of mirror. The face distance is mixed into the digit distance with the morph, so the eyes and the mouth melt into the digits and back. |
+| Minute change | `uDigitsPrev` and `uTick`: the distance to the old digits is mixed into the new ones over 0.6 s. Only the strokes that change melt and grow back. |
+| Look | `CLOCK_LOOK`: the idle colours with a calmer surface (`amp` 0.04), so the digits stay readable. Night dimming applies as in idle. |
+
+Screenshots: `docs/screenshots/clock-1280x800.png` and `-1024x768.png` show the time of the run.
+
 ## After the merge with main (S3/S4)
 
 - **Alerts.** Alerts use the same shading, with a lava colour from `ALERT_LAVA`. Their flat faces get stronger flowing ripples in the reflection (`faceted`), so they do not mirror one flat colour.
