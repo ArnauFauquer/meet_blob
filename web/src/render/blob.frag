@@ -39,6 +39,10 @@ uniform float uMix;
 uniform vec4 uEyes;   // eye half width, half height (blink applied), height, happy (0 open, 1 arcs)
 uniform vec2 uGaze;   // where the face looks
 uniform vec3 uMouth;  // curvature (+ smile), opening, face strength
+// Clock (shape 3, the idle blob at rest): HH:MM as lava digits on a wide pill.
+uniform vec4 uDigits;     // the four digits shown
+uniform vec4 uDigitsPrev; // the digits before the last change
+uniform float uTick;      // 0..1, melts uDigitsPrev into uDigits
 
 out vec4 fragColor;
 
@@ -73,6 +77,12 @@ float radius() {
 // cycles, so they pass, merge and split again. Quality uses the first LOBES.
 uniform vec4 uLobes[5];
 
+// Slow ripples: three crossed sines, much cheaper than value noise.
+float ripple(vec3 p) {
+  vec3 w = p * vec3(2.1, 2.6, 2.3) + vec3(uFlow * 0.7, -uFlow * 0.9, uFlow * 0.5);
+  return sin(w.x + 0.8 * w.y) * sin(w.y - 0.6 * w.z) * sin(w.z + 0.7 * w.x) * uAmp * 0.35;
+}
+
 // A sphere with lava lobes pushing its surface from inside, a slow noise
 // displacement, and larger, faster swells driven by the level.
 float sphereShape(vec3 p) {
@@ -86,9 +96,7 @@ float sphereShape(vec3 p) {
 #if LOBES > 4
   LOBE(4)
 #endif
-  // Slow ripples: three crossed sines, much cheaper than value noise.
-  vec3 w = p * vec3(2.1, 2.6, 2.3) + vec3(uFlow * 0.7, -uFlow * 0.9, uFlow * 0.5);
-  d += sin(w.x + 0.8 * w.y) * sin(w.y - 0.6 * w.z) * sin(w.z + 0.7 * w.x) * uAmp * 0.35;
+  d += ripple(p);
   if (uLevel > 0.002) d += (noise(p * 1.9 + vec3(0.0, uFlow * 1.3, uFlow * 0.9)) - 0.5) * uLevel * 0.17;
   return d;
 }
@@ -125,9 +133,27 @@ vec2 alertShapes(vec3 p) {
   return d * s;
 }
 
-// Shape ids (SHAPE in tables.ts): 0 sphere, 1 triangle, 2 square.
-float pickShape(float id, float sphere, vec2 alerts) {
-  return id < 0.5 ? sphere : (id < 1.5 ? alerts.x : alerts.y);
+// Clock size: larger than the blob, to be read from across the room. It
+// breathes with the radius and shrinks to fit a narrow screen.
+float clockScale() {
+  return radius() / uRadius * 1.3 * min(1.0, uRes.x / uRes.y / 1.3);
+}
+
+// The clock body: a wide pill facing the camera, still liquid on its surface.
+// It stays inside the clock's bounding sphere in main().
+float clockShape(vec3 p) {
+  float s = clockScale();
+  p /= s;
+  return (sdRoundBox(p, vec3(1.2, 0.5, 0.3), 0.3) + ripple(p)) * s;
+}
+
+// Shape ids (SHAPE in tables.ts): 0 sphere, 1 triangle, 2 square, 3 clock.
+float pickShape(float id, float sphere, vec2 alerts, float clock) {
+  return id < 0.5 ? sphere : (id < 1.5 ? alerts.x : (id < 2.5 ? alerts.y : clock));
+}
+
+bool isAlert(float id) {
+  return id > 0.5 && id < 2.5;
 }
 
 float map(vec3 p) {
@@ -135,12 +161,13 @@ float map(vec3 p) {
   // Each distance function appears once here (not once per shape slot), so the
   // compiled shader stays small: software GL stalls the page while it compiles.
   float sphere = (uShapeA < 0.5 || (morph && uShapeB < 0.5)) ? sphereShape(p) : 0.0;
-  vec2 alerts = (uShapeA > 0.5 || (morph && uShapeB > 0.5)) ? alertShapes(p) : vec2(0.0);
-  float a = pickShape(uShapeA, sphere, alerts);
+  vec2 alerts = (isAlert(uShapeA) || (morph && isAlert(uShapeB))) ? alertShapes(p) : vec2(0.0);
+  float clock = (uShapeA > 2.5 || (morph && uShapeB > 2.5)) ? clockShape(p) : 0.0;
+  float a = pickShape(uShapeA, sphere, alerts, clock);
   if (!morph) return a;
   // A mix of two distance fields is not a true distance: scaling it by 0.875
   // turns the usual 0.8 march step into about 0.7 while morphing.
-  return mix(a, pickShape(uShapeB, sphere, alerts), uMix) * 0.875;
+  return mix(a, pickShape(uShapeB, sphere, alerts, clock), uMix) * 0.875;
 }
 
 vec3 normalAt(vec3 p) {
@@ -264,6 +291,7 @@ float lavaDist(vec3 q, float r, float pull) {
 // triangle so it fits inside.
 vec2 faceSpace(vec3 p, float id) {
   if (id < 0.5) return p.xy / radius();
+  if (id > 2.5) return p.xy / (uRadius * clockScale());
   vec2 f = alertFrame(p).xy / uRadius;
   return id < 1.5 ? (f + vec2(0.0, 0.3)) / 0.62 : f / 0.95;
 }
@@ -299,6 +327,34 @@ float faceDist(vec2 q) {
   return d;
 }
 
+// Seven-segment digits. SEG: lit segments of 0..9, bit s is segment s.
+// SEG_LINE: the ends of segment s (xy to zw) in units of the digit half size.
+const int SEG[10] = int[10](63, 6, 91, 79, 102, 109, 125, 7, 127, 111);
+const vec4 SEG_LINE[7] = vec4[7](vec4(-1, 1, 1, 1), vec4(1, 1, 1, 0), vec4(1, 0, 1, -1), vec4(-1, -1, 1, -1),
+                                 vec4(-1, 0, -1, -1), vec4(-1, 1, -1, 0), vec4(-1, 0, 1, 0));
+
+// Distance to the clock strokes: HH:MM, in the same units as the face. A
+// minute change mixes the distance to the old digits into the new ones, so
+// the strokes that change melt away and grow back.
+float clockDist(vec2 q) {
+  const vec2 hs = vec2(0.15, 0.32); // digit half size
+  vec2 d = vec2(1e3); // x: the digits shown, y: the digits before
+  for (int i = 0; i < 4; i++) {
+    vec2 c = q - vec2((float(i) - 1.5) * 0.48 + (i < 2 ? -0.22 : 0.22), 0.0);
+    int now = SEG[clamp(int(uDigits[i] + 0.5), 0, 9)];
+    int was = SEG[clamp(int(uDigitsPrev[i] + 0.5), 0, 9)];
+    for (int s = 0; s < 7; s++) {
+      vec2 pa = c - SEG_LINE[s].xy * hs;
+      vec2 ba = (SEG_LINE[s].zw - SEG_LINE[s].xy) * hs;
+      float ds = length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+      if (((now >> s) & 1) == 1) d.x = min(d.x, ds);
+      if (((was >> s) & 1) == 1) d.y = min(d.y, ds);
+    }
+  }
+  float colon = length(vec2(q.x, abs(q.y) - 0.15)) - 0.012;
+  return min(mix(d.y, d.x, smoothstep(0.0, 1.0, uTick)), colon) - 0.045;
+}
+
 // Glow of one lava sample: a soft halo outside the shape, then brighter
 // towards the core, so a slice through a lobe is never a flat disc.
 float lavaHeat(float ld, float r) {
@@ -321,7 +377,7 @@ void main() {
   col += uColor * min(uGlow, 1.2) * (0.026 * exp(-out_ * 5.0) + 0.0025 * exp(-out_ * 1.8));
 
   // Bounding sphere: rays that miss it skip the march.
-  float rb = r * 1.5 + 0.1;
+  float rb = (uShapeA > 2.5 || uShapeB > 2.5) ? 1.7 : r * 1.5 + 0.1; // the clock is wider
   float h = b * b - (dot(ro, ro) - rb * rb);
   if (h > 0.0) {
     float t = b - sqrt(h);
@@ -377,6 +433,9 @@ void main() {
         vec2 fq = faceSpace(p, uShapeA);
         if (uMix > 0.001) fq = mix(fq, faceSpace(p, uShapeB), uMix);
         float fd = faceDist(fq);
+        // The face melts into the digits (and back) with the shape morph.
+        float ck = (uShapeA > 2.5 ? 1.0 - uMix : 0.0) + (uShapeB > 2.5 ? uMix : 0.0);
+        if (ck > 0.001) fd = mix(fd, clockDist(fq), ck);
         float front = uMouth.z * smoothstep(0.0, 0.5, n.z);
         heat += front * 0.4 * exp(-max(fd, 0.0) / 0.04);
         spec *= 1.0 - 0.75 * min(front, 1.0) * exp(-max(fd, 0.0) / 0.09);

@@ -14,6 +14,7 @@ import { Diag, onPress } from './diag';
 import { FaultLine } from './fault';
 import type { AlertItem, ConvState, ServerMessage, TurnDoneMsg } from './protocol';
 import { BlobRenderer, type FrameInput } from './render/blob';
+import { CLOCK_AFTER_MS } from './render/tables';
 import { computeView, overlayActive, setsOverlay, topAlert, turnActive, type View } from './state';
 import { decideTap } from './taps';
 import { loadCredentials, TOKEN_KEY } from './token';
@@ -132,12 +133,16 @@ function view(): View {
   return computeView({ online: socketStatus === 'open', conv, playing: turnPlaying(), overlay: overlay(), alerts });
 }
 
+let idleSince = performance.now(); // start of the current unbroken idle stretch
+
 function frameInput(): FrameInput {
   const v = view();
+  const now = performance.now();
+  if (v !== 'idle') idleSince = now;
   faults.set('mic_denied', capture.status === 'denied');
   const level =
     v === 'listening' ? capture.level() : v === 'speaking' || v === 'error' || v === 'alert' ? playback.level() : 0;
-  return { view: v, level, alert: v === 'alert' ? topAlert(alerts) : null };
+  return { view: v, level, alert: v === 'alert' ? topAlert(alerts) : null, clock: now - idleSince >= CLOCK_AFTER_MS ? new Date() : null };
 }
 
 // Chime once per new alert, held while a turn is active (design, Display rules).
@@ -481,8 +486,13 @@ window.blobDebug = {
   setDim(v: number) {
     if (renderer) renderer.dim = Math.max(0, Math.min(1, v));
   },
-  step(dtS: number, v: View, level: number, draw: boolean) {
-    renderer?.step(dtS, { view: v, level }, draw);
+  // `clock`: a local time such as '2026-01-01T09:41', to draw the idle clock.
+  step(dtS: number, v: View, level: number, draw: boolean, clock?: string) {
+    renderer?.step(dtS, { view: v, level, clock: clock ? new Date(clock) : null }, draw);
+  },
+  // Pretends the page has been idle for `ms` (the clock appears after CLOCK_AFTER_MS).
+  idleFor(ms: number) {
+    idleSince = performance.now() - ms;
   },
   get alerts() {
     return alerts.map((a) => a.key);
@@ -510,8 +520,8 @@ window.blobDebug = {
   },
   // Screenshot scripts only. No view: hold the current frame (a mid-morph
   // capture). With a view: stop and restart that view's motion at zero (film strip).
-  freeze(v?: View) {
-    if (v) renderer?.freeze(v);
+  freeze(v?: View, clock?: string) {
+    if (v) renderer?.freeze(v, clock ? new Date(clock) : null);
     else renderer?.stop();
   },
 };

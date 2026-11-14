@@ -12,7 +12,7 @@ import {
 } from 'three';
 import fragmentShader from './blob.frag?raw';
 import vertexShader from './blob.vert?raw';
-import { LOBE_COUNT, SHAPE, alertLook, alertShape, lobes, lookFor, type Look } from './tables';
+import { CLOCK_LOOK, LOBE_COUNT, SHAPE, alertLook, alertShape, clockDigits, lobes, lookFor, type Look } from './tables';
 import { morphMix, stepMorph, type Morph } from './morph';
 import type { AlertItem } from '../protocol';
 import type { View } from '../state';
@@ -37,10 +37,12 @@ export interface FrameInput {
   view: View;
   level: number; // mic level while listening, playback level while speaking
   alert?: Pick<AlertItem, 'source' | 'urgency'> | null; // the top alert, drawn when view is 'alert'
+  clock?: Date | null; // the time to show: the idle blob rests as a clock while this is set
 }
 
 function targetOf(i: FrameInput): { look: Look; shape: number } {
   if (i.view === 'alert' && i.alert) return { look: alertLook(i.alert.urgency), shape: alertShape(i.alert.source) };
+  if (i.view === 'idle' && i.clock) return { look: CLOCK_LOOK, shape: SHAPE.clock };
   return { look: lookFor(i.view === 'alert' ? 'idle' : i.view), shape: SHAPE.sphere };
 }
 
@@ -64,6 +66,7 @@ export class BlobRenderer {
   private flashT = 0;
   private blinkT = 0; // time since the last blink ended
   private blinkN = 1;
+  private tickT = 1; // progress of the melt from the old clock digits to the new ones
   private raf = 0;
   quality = MAX_QUALITY;
   autoQuality = true;
@@ -105,6 +108,9 @@ export class BlobRenderer {
         uEyes: { value: new Vector4() },
         uGaze: { value: new Vector2() },
         uMouth: { value: new Vector3() },
+        uDigits: { value: new Vector4() },
+        uDigitsPrev: { value: new Vector4() },
+        uTick: { value: 1 },
       },
     });
     this.scene.add(new Mesh(new PlaneGeometry(2, 2), this.material));
@@ -159,9 +165,9 @@ export class BlobRenderer {
 
   // Debug clock for the film strip: stop the loop and restart the motion from
   // zero in `view`'s look, so frames are reproducible.
-  freeze(view: View): void {
+  freeze(view: View, clock?: Date | null): void {
     this.stop();
-    const { look, shape } = targetOf({ view, level: 0 });
+    const { look, shape } = targetOf({ view, level: 0, clock });
     Object.assign(this.cur, structuredClone(look));
     Object.assign(this.morph, { a: shape, b: shape, t: 0 });
     const u = this.material.uniforms;
@@ -233,6 +239,21 @@ export class BlobRenderer {
     const open = this.blinkT < gap ? 1 : Math.abs((this.blinkT - gap) / BLINK_S - 0.5) * 2;
 
     const u = this.material.uniforms;
+    if (fi.clock) {
+      const d = clockDigits(fi.clock);
+      const shown = u.uDigits.value as Vector4;
+      if (d.some((v, i) => v !== shown.getComponent(i))) {
+        // A minute change melts the old digits into the new ones. The digits
+        // of an earlier rest are stale: those are replaced at once.
+        const prev = u.uDigitsPrev.value as Vector4;
+        if (this.morph.a === SHAPE.clock) prev.copy(shown);
+        else prev.fromArray(d);
+        shown.fromArray(d);
+        this.tickT = 0;
+      }
+    }
+    this.tickT = Math.min(1, this.tickT + dt / EASE_S);
+    u.uTick.value = this.tickT;
     u.uFlow.value += dt * c.speed;
     u.uPhase.value = (u.uPhase.value + dt * c.breathHz * 2 * Math.PI) % (2 * Math.PI);
     (u.uColor.value as Vector3).set(c.color[0], c.color[1], c.color[2]);

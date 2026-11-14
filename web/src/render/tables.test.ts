@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALERT_COLOR, SHAPE, STATE_LOOK, alertLook, alertShape } from './tables';
+import { ALERT_COLOR, CLOCK_AFTER_MS, CLOCK_LOOK, SHAPE, STATE_LOOK, alertLook, alertShape, clockDigits } from './tables';
 
 describe('alert table', () => {
   it('timer is a triangle, every other source a square', () => {
@@ -19,6 +19,19 @@ describe('alert table', () => {
   it('returns a copy, so the renderer can ease it in place', () => {
     alertLook('info').color[0] = 9;
     expect(ALERT_COLOR.info[0]).not.toBe(9);
+  });
+});
+
+describe('idle clock', () => {
+  it('appears after five minutes, in the idle colours with a calmer surface', () => {
+    expect(CLOCK_AFTER_MS).toBe(300_000);
+    expect(CLOCK_LOOK.color).toEqual(STATE_LOOK.idle.color);
+    expect(CLOCK_LOOK.amp).toBeLessThan(STATE_LOOK.idle.amp);
+  });
+  it('shows local HH:MM as four digits, with leading zeros', () => {
+    expect(clockDigits(new Date(2026, 0, 1, 9, 41))).toEqual([0, 9, 4, 1]);
+    expect(clockDigits(new Date(2026, 0, 1, 23, 5))).toEqual([2, 3, 0, 5]);
+    expect(clockDigits(new Date(2026, 0, 1, 0, 0))).toEqual([0, 0, 0, 0]);
   });
 });
 

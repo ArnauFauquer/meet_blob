@@ -47,8 +47,20 @@ export function lookFor(view: Exclude<View, 'alert'>): Look {
 }
 
 // Shape ids understood by shape() in blob.frag.
-export const SHAPE = { sphere: 0, triangle: 1, square: 2 } as const;
+export const SHAPE = { sphere: 0, triangle: 1, square: 2, clock: 3 } as const;
 export type ShapeId = (typeof SHAPE)[keyof typeof SHAPE];
+
+// Clock: after CLOCK_AFTER_MS in idle the blob rests as a digital clock, in
+// the idle colours with a calmer surface so the digits stay readable.
+export const CLOCK_AFTER_MS = 5 * 60_000;
+export const CLOCK_LOOK: Look = { ...STATE_LOOK.idle, speed: 0.15, amp: 0.04, breath: 0.012 };
+
+// HH:MM in local time as four digits.
+export function clockDigits(d: Date): [number, number, number, number] {
+  const h = d.getHours();
+  const m = d.getMinutes();
+  return [Math.floor(h / 10), h % 10, Math.floor(m / 10), m % 10];
+}
 
 // Alert source to shape. Slice 4: timer is a triangle, every other source a square.
 export const SOURCE_SHAPE: Record<string, ShapeId> = { timer: SHAPE.triangle };
