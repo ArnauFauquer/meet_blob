@@ -24,7 +24,7 @@ import type { Detector, WakeConfig } from './wake/detector';
 import { PcmRing, PhraseSegmenter, ScoreHistory, msToSamples, samplesToMs } from './wake/clips';
 import { FollowUp, gateReason, wakeAllowed } from './wake/wake-gate';
 import { MicStats, PeakTracker, type WakePeak } from './wake/wake-log';
-import { checkVersion } from './version';
+import { checkVersion, entryBundle } from './version';
 import { keepAwake } from './wakelock';
 import { BlobSocket, type SocketStatus } from './ws';
 
@@ -246,6 +246,20 @@ async function startHandsFree(): Promise<void> {
   }
 }
 
+// A reconnect usually means a deploy. PAGE_VERSION is the protocol version, so
+// hello_ok does not reload a page built before it: compare the entry bundle.
+async function reloadIfRebuilt(): Promise<void> {
+  const mine = entryBundle(document.documentElement.outerHTML);
+  if (!mine) return;
+  try {
+    const res = await fetch('/', { cache: 'no-store' });
+    const served = res.ok ? entryBundle(await res.text()) : null;
+    if (served && served !== mine) location.reload();
+  } catch {
+    // Offline again: the next reconnect checks again.
+  }
+}
+
 let askedToken = false;
 function askToken(): void {
   if (askedToken) return;
@@ -269,6 +283,7 @@ const sock = new BlobSocket({
   },
   onStatus(s) {
     socketStatus = s;
+    if (s === 'open' && everOpen) void reloadIfRebuilt();
     everOpen ||= s === 'open';
     faults.set('socket_down', s === 'down' || (s === 'connecting' && everOpen));
     faults.set('bad_token', s === 'bad_token');

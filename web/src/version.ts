@@ -9,3 +9,9 @@ export function checkVersion(serverVersion: string, pageVersion: string, storage
   storage.setItem(RELOADED_FOR_KEY, serverVersion);
   return 'reload';
 }
+
+// The built page's entry bundle (/assets/index-<hash>.js) in an index.html, or
+// null on the dev server. It changes with every build that changes the page.
+export function entryBundle(html: string): string | null {
+  return html.match(/\/assets\/index-[\w-]+\.js/)?.[0] ?? null;
+}
