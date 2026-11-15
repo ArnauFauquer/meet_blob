@@ -20,7 +20,14 @@ docker build -t blob .
 
 CI: `.github/workflows/image.yml` builds on every push to `main` that touches `backend/`, `web/`,
 the Dockerfile or the workflow (and on manual dispatch), and pushes
-`ghcr.io/arnaufauquer/meet_blob:sha-<7-char commit>` and `:latest`. It uses only `GITHUB_TOKEN`.
+`ghcr.io/arnaufauquer/meet_blob:X.Y.Z`, `:sha-<7-char commit>` and `:latest`, then tags the commit
+`vX.Y.Z`. The version comes from the conventional commits since the previous `vX.Y.Z` tag: `feat`
+bumps the minor, `BREAKING CHANGE` or `!` the major, anything else the patch. It uses only
+`GITHUB_TOKEN`.
+
+Deploys are automatic: Renovate (hourly, in home_lab) sees the new `X.Y.Z`, rewrites
+`image.tag` in `faukinator/blob/values.yaml` as `X.Y.Z@sha256:<digest>` and automerges; Argo CD
+then syncs. Rollback = revert that Renovate commit in home_lab.
 
 Run locally without a GPU or real models:
 
@@ -70,7 +77,7 @@ Every other setting keeps the default in `backend/blob/config.py`.
 3. No ghcr pull Secret is needed: meet_blob and its package `ghcr.io/arnaufauquer/meet_blob` are
    public. The chart's `imagePullSecrets` entry can be emptied (`[]`); a missing Secret only makes
    the kubelet log a warning, the pull still works.
-4. Set `image.tag` in `faukinator/blob/values.yaml` to the `sha-<commit>` tag CI pushed. The chart
-   refuses to render without it.
+4. `image.tag` in `faukinator/blob/values.yaml` holds `X.Y.Z@sha256:<digest>`; Renovate keeps it
+   current. The chart refuses to render without it.
 5. Point `blob.faukinator.com` at Traefik if the Pi-hole wildcard does not already cover it.
 6. Install the tablet once with `https://blob.faukinator.com/#t=<DEVICE_TOKEN>&device=tablet`.
