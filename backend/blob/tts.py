@@ -46,10 +46,15 @@ class KokoroTts:
         from kokoro_onnx import Kokoro
 
         download(self._dir)
-        providers = ["CUDAExecutionProvider"] if self._device == "cuda" else []
+        providers = []
+        if self._device == "cuda":
+            rt.preload_dlls()  # cuDNN and CUDA 13 come from the nvidia-* pip wheels
+            providers = ["CUDAExecutionProvider"]
         session = rt.InferenceSession(
             str(self._dir / FILES[0]), providers=[*providers, "CPUExecutionProvider"]
         )
+        # onnxruntime falls back to the CPU when CUDA fails to load; this line shows which ran.
+        log.info("kokoro providers: %s", session.get_providers())
         self._kokoro = Kokoro.from_session(session, str(self._dir / FILES[1]))
 
     def warmup(self) -> None:
