@@ -241,6 +241,16 @@ def test_same_timer_twice_creates_two(api: TestClient, wall: Wall) -> None:
     assert len(api.get("/alerts", headers=AUTH).json()) == 2
 
 
+def test_timers_lists_pending_timers_soonest_first(api: TestClient, wall: Wall) -> None:
+    post(api, key="long", source="timer", text="x", in_s=600)
+    post(api, key="short", source="timer", text="x", in_s=60)
+    post(api, key="cal", source="calendar", text="x", in_s=30)  # not a timer
+    post(api, key="now", source="timer", text="x")  # active, not pending
+    wall.now += 10
+    store: Alerts = api.app.state.alerts  # type: ignore[attr-defined]
+    assert [(t.key, t.left_s) for t in store.timers()] == [("short", 50), ("long", 590)]
+
+
 def test_delete_is_idempotent(api: TestClient) -> None:
     post(api, key="k", source="s", text="t")
     assert api.delete("/alerts/k", headers=AUTH).status_code == 204

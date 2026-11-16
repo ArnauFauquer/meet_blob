@@ -37,6 +37,11 @@ export interface AlertItem {
   activated_at: number;
 }
 
+export interface TimerItem {
+  key: string;
+  left_s: number; // seconds until it fires, when the snapshot was built
+}
+
 export interface Timings {
   stt_ms: number | null;
   hermes_ms: number | null;
@@ -80,7 +85,7 @@ export type ClientMessage =
 
 // Server to client
 export interface HelloOkMsg { type: 'hello_ok'; version: string; ok: boolean }
-export interface SnapshotMsg { type: 'snapshot'; conv: ConvState; alerts: AlertItem[] }
+export interface SnapshotMsg { type: 'snapshot'; conv: ConvState; alerts: AlertItem[]; timers: TimerItem[] }
 export interface StateMsg { type: 'state'; conv: ConvState; turn: number | null }
 export interface TtsMsg {
   type: 'tts';

@@ -31,7 +31,7 @@ const clientSamples: { [K in ClientMessage['type']]: Extract<ClientMessage, { ty
 };
 const serverSamples: { [K in ServerMessage['type']]: Extract<ServerMessage, { type: K }> } = {
   hello_ok: { type: 'hello_ok', version: '1', ok: true },
-  snapshot: { type: 'snapshot', conv: 'idle', alerts: [] },
+  snapshot: { type: 'snapshot', conv: 'idle', alerts: [], timers: [] },
   state: { type: 'state', conv: 'listening', turn: 1 },
   tts: { type: 'tts', turn: 1, alert: null, seq: 0, final: true, followup: false },
   turn_done: {

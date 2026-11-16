@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeView, overlayActive, setsOverlay, topAlert, turnActive, type ViewInput } from './state';
+import { computeView, overlayActive, setsOverlay, timerText, topAlert, turnActive, type ViewInput } from './state';
 import { TURN_DONE_REASONS, type AlertItem } from './protocol';
 
 const base: ViewInput = { online: true, conv: 'idle', playing: false, overlay: false };
@@ -81,5 +81,14 @@ describe('topAlert', () => {
   });
   it('same urgency and age: key order, so every client agrees', () => {
     expect(topAlert([alert('b', 'info', 1), alert('a', 'info', 1)])?.key).toBe('a');
+  });
+});
+
+describe('timerText', () => {
+  it('formats each pending timer and counts down from the snapshot', () => {
+    expect(timerText([], 0)).toBe('');
+    expect(timerText([{ key: 'a', left_s: 65 }], 0)).toBe('1:05');
+    expect(timerText([{ key: 'a', left_s: 65 }], 5.5)).toBe('1:00');
+    expect(timerText([{ key: 'a', left_s: 3 }, { key: 'b', left_s: 3725 }], 10)).toBe('0:00  ·  1:01:55');
   });
 });

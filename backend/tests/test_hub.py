@@ -53,7 +53,7 @@ def connect(client: TestClient, device: str = "desktop") -> Iterator[WebSocketTe
     with client.websocket_connect("/ws") as ws:
         hello(ws, device=device)
         assert recv(ws) == {"type": "hello_ok", "version": __version__, "ok": True}
-        assert recv(ws) == {"type": "snapshot", "conv": "idle", "alerts": []}
+        assert recv(ws) == {"type": "snapshot", "conv": "idle", "alerts": [], "timers": []}
         yield ws
 
 
@@ -109,7 +109,7 @@ def test_full_turn(client: TestClient, fake_hermes: FakeHermes) -> None:
             "sc1_ms",
         }
         assert recv(ws) == {"type": "state", "conv": "idle", "turn": None}
-        assert recv(ws) == {"type": "snapshot", "conv": "idle", "alerts": []}
+        assert recv(ws) == {"type": "snapshot", "conv": "idle", "alerts": [], "timers": []}
         assert len(fake_hermes.requests) == 1
 
 
@@ -121,7 +121,9 @@ def test_mirror_gets_state_but_not_audio(client: TestClient) -> None:
         utterance(a, turn, SPEECH)
         until(a, "turn_done")
         seen: list[Any] = []
-        while not (seen and seen[-1] == {"type": "snapshot", "conv": "idle", "alerts": []}):
+        while not (
+            seen and seen[-1] == {"type": "snapshot", "conv": "idle", "alerts": [], "timers": []}
+        ):
             seen.append(recv(b))
         assert all(isinstance(m, dict) and m["type"] in {"state", "snapshot"} for m in seen)
 
@@ -364,7 +366,7 @@ def test_alert_broadcast_to_every_client(client: TestClient) -> None:
                 False,
             )
         client.delete("/alerts/door", headers={"Authorization": f"Bearer {ALERT_TOKEN}"})
-        assert recv(a) == {"type": "snapshot", "conv": "idle", "alerts": []}
+        assert recv(a) == {"type": "snapshot", "conv": "idle", "alerts": [], "timers": []}
 
 
 def test_snapshot_on_connect_lists_active_only(client: TestClient) -> None:
@@ -391,8 +393,8 @@ def test_alert_read_then_ack(client: TestClient) -> None:
         audio = recv(ws)
         assert isinstance(audio, bytes) and audio[:4] == b"RIFF"
         ws.send_json({"type": "alert_ack", "key": "wash"})
-        assert recv(ws) == {"type": "snapshot", "conv": "idle", "alerts": []}
-        assert recv(other) == {"type": "snapshot", "conv": "idle", "alerts": []}
+        assert recv(ws) == {"type": "snapshot", "conv": "idle", "alerts": [], "timers": []}
+        assert recv(other) == {"type": "snapshot", "conv": "idle", "alerts": [], "timers": []}
         ws.send_json({"type": "alert_read", "key": "wash"})  # acked: no longer readable
         assert recv(ws) == {"type": "error", "code": "bad_message"}
         ws.send_json({"type": "alert_ack", "key": "wash"})  # a second ack is ignored
@@ -474,11 +476,14 @@ def test_timer_fires_and_snapshot_changes(app_factory: Any) -> None:
         wait_ready(c)
         with connect(c) as ws:
             assert post_alert(c, key="t", source="timer", text="Fin", in_s=1)["state"] == "pending"
-            assert recv(ws) == {"type": "snapshot", "conv": "idle", "alerts": []}
+            pending = recv(ws)
+            assert pending["alerts"] == [] and [t["key"] for t in pending["timers"]] == ["t"]
+            assert 0 < pending["timers"][0]["left_s"] <= 2  # fire_at is rounded to whole seconds
             snap = recv(ws)  # within about 1 s plus the 250 ms scheduler cap
             assert [(a["key"], a["urgency"], a["late"]) for a in snap["alerts"]] == [
                 ("t", "urgent", False)
             ]
+            assert snap["timers"] == []
 
 
 def test_voice_timer_through_the_rule(app_factory: Any, fake_hermes: FakeHermes) -> None:

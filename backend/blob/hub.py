@@ -110,7 +110,9 @@ class Hub:
                 await c.send(snap)
 
     def _snapshot(self) -> Snapshot:
-        return Snapshot(conv=self.turns.conv, alerts=self.alerts.items())
+        return Snapshot(
+            conv=self.turns.conv, alerts=self.alerts.items(), timers=self.alerts.timers()
+        )
 
     async def serve(self, ws: WebSocket) -> None:
         await ws.accept()

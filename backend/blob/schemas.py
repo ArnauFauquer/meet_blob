@@ -132,6 +132,11 @@ class AlertItem(BaseModel):
     activated_at: int
 
 
+class TimerItem(BaseModel):
+    key: str
+    left_s: float  # seconds until it fires, at the time the snapshot was built
+
+
 class HelloOk(BaseModel):
     type: Literal["hello_ok"] = "hello_ok"
     version: str
@@ -142,6 +147,7 @@ class Snapshot(BaseModel):
     type: Literal["snapshot"] = "snapshot"
     conv: ConvState
     alerts: list[AlertItem] = []
+    timers: list[TimerItem] = []  # pending timers, soonest first (the countdown on screen)
 
 
 class State(BaseModel):
