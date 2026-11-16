@@ -77,7 +77,7 @@ export const ALERT_LAVA: Record<Urgency, [number, number, number]> = {
 export const INFO_PULSE_HZ = 0.45;
 export const URGENT_PULSE_FACTOR = 2; // urgent pulses at twice the rate of info
 
-const ALERT_MOTION = { speed: 0.25, amp: 0.05, breath: 0.07, levelGain: 0.6, glow: 1.1, bright: 1.05 };
+const ALERT_MOTION = { speed: 0.3, amp: 0.09, breath: 0.07, levelGain: 0.6, glow: 1.1, bright: 1.05 };
 
 export function alertShape(source: string): ShapeId {
   return SOURCE_SHAPE[source] ?? DEFAULT_ALERT_SHAPE;

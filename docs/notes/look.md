@@ -91,6 +91,22 @@ After 5 minutes of unbroken idle (`CLOCK_AFTER_MS`), the blob rests as a digital
 
 Screenshots: `docs/screenshots/clock-1280x800.png` and `-1024x768.png` show the time of the run.
 
+## Character: body motion
+
+The shapes used to sit still once a morph ended. `animateBody()` in `blob.ts` now moves the whole body, on top of the look. The shader marches the ray in the body frame: one matrix `uBody` (turns and flips, jelly lean, squash and stretch) and an offset `uBodyPos`, applied once per pixel, so `map()` does not pay for it.
+
+| What | How |
+|---|---|
+| Squash and stretch | A damped spring (2.6 Hz, damping ratio 0.22) at constant volume. Kicked by the crouch before a morph, the landing after it, every alert landing, each new minute on the clock, any other change of view and the acts. |
+| Jelly lean | A second spring: the top lags behind sideways moves (a shear in `uBody`). |
+| Morph | The body hops (0.22), stretches in the air and makes one full twirl (`stepTwirl()` in `morph.ts`). A morph reversed mid-way unwinds the twirl. |
+| Acts | `acts.ts`: little scenes with anticipation, landing and expression (lids, happy eyes, mouth), chosen at random from a repertoire per mood. Idle: look to a side, look around, curious tilt, yawn, doze, dance, hops, backflip, spin jump, peek. Info alert: hops, dance, peek, flips. Urgent: panic, peek, hops (never a pleased face). Thinking: ponder, compute (eyes run like reading), foot tapping, loading orbit, turn the idea over, effort, eureka, stare at the ceiling, dizzy. Clock: hops, dance, tilt, flips, every 7 to 14 s. Any other view stops the act and fades its pose out in about 0.15 s. `blobDebug.act(name)` starts one. |
+| Alerts | Rounder bodies: an exact rounded triangle prism and a rounded box. Three lava lobes push bumps out of their faces and edges, and the sphere's ripples run over them. Between acts they jump with the pulse and rock; `urgent` also trembles. |
+| Clock | It floats, rocks and sways a little. The digits ride a slow wave (`uDigitY`), the colon beats once a second (`uColon`), and the lava lobes press on the pill. |
+| Eyes | Between acts the eyes dart to a new point every 1.2 to 4 s, often back to the centre. |
+
+Contact sheets in `docs/screenshots/motion/`: `clock`, `alert-timer-info`, `alert-square-urgent`, `morph-to-triangle`, `morph-to-clock`, `act-backflip-square`, `act-look-around`, `act-doze`, `act-spin-triangle`, `thinking-acts`. Frame cost in SwiftShader at idle: 219 ms against 207 ms on main (+6%): software GL evaluates the alert shapes on every step even when the sphere is shown. A GPU skips them (uniform branch).
+
 ## After the merge with main (S3/S4)
 
 - **Alerts.** Alerts use the same shading, with a lava colour from `ALERT_LAVA`. Their flat faces get stronger flowing ripples in the reflection (`faceted`), so they do not mirror one flat colour.

@@ -515,8 +515,9 @@ window.blobDebug = {
     if (renderer) renderer.dim = Math.max(0, Math.min(1, v));
   },
   // `clock`: a local time such as '2026-01-01T09:41', to draw the idle clock.
-  step(dtS: number, v: View, level: number, draw: boolean, clock?: string) {
-    renderer?.step(dtS, { view: v, level, clock: clock ? new Date(clock) : null }, draw);
+  // `alert`: the top alert drawn when `v` is 'alert'.
+  step(dtS: number, v: View, level: number, draw: boolean, clock?: string, alert?: FrameInput['alert']) {
+    renderer?.step(dtS, { view: v, level, clock: clock ? new Date(clock) : null, alert }, draw);
   },
   // Pretends the page has been idle for `ms` (the clock appears after CLOCK_AFTER_MS).
   idleFor(ms: number) {
@@ -548,8 +549,12 @@ window.blobDebug = {
   },
   // Screenshot scripts only. No view: hold the current frame (a mid-morph
   // capture). With a view: stop and restart that view's motion at zero (film strip).
-  freeze(v?: View, clock?: string) {
-    if (v) renderer?.freeze(v, clock ? new Date(clock) : null);
+  // Starts a little act now (names in ACTS, render/acts.ts).
+  act(name: string) {
+    renderer?.play(name);
+  },
+  freeze(v?: View, clock?: string, alert?: FrameInput['alert']) {
+    if (v) renderer?.freeze(v, clock ? new Date(clock) : null, alert);
     else renderer?.stop();
   },
 };
