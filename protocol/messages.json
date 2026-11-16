@@ -39,6 +39,10 @@
     "late": "bool",
     "activated_at": "int (UTC epoch s)"
   },
+  "timer_item": {
+    "key": "str",
+    "left_s": "float (seconds until it fires, when the snapshot was built)"
+  },
   "client_to_server": {
     "hello": {
       "slice": "S1",
@@ -120,7 +124,8 @@
       "slice": "S1",
       "fields": {
         "conv": "conv_state",
-        "alerts": "alert_item[] (active alerts only; empty before S4)"
+        "alerts": "alert_item[] (active alerts only; empty before S4)",
+        "timers": "timer_item[] (pending source=timer alerts, soonest first; the on-screen countdown)"
       }
     },
     "state": {

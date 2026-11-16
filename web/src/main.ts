@@ -12,10 +12,10 @@ import {
 } from './config';
 import { Diag, onPress } from './diag';
 import { FaultLine } from './fault';
-import type { AlertItem, ConvState, ServerMessage, TurnDoneMsg } from './protocol';
+import type { AlertItem, ConvState, ServerMessage, TimerItem, TurnDoneMsg } from './protocol';
 import { BlobRenderer, type FrameInput } from './render/blob';
 import { CLOCK_AFTER_MS } from './render/tables';
-import { computeView, overlayActive, setsOverlay, topAlert, turnActive, type View } from './state';
+import { computeView, overlayActive, setsOverlay, timerText, topAlert, turnActive, type View } from './state';
 import { decideTap } from './taps';
 import { loadCredentials, TOKEN_KEY } from './token';
 import { TurnClient, type TurnDeps } from './turn-client';
@@ -44,6 +44,8 @@ let lastTurn: TurnDoneMsg | null = null;
 let deviceConfig = DEFAULT_DEVICE_CONFIG;
 let configLoaded = false;
 let alerts: AlertItem[] = [];
+let timers: TimerItem[] = [];
+let timersAt = 0; // performance.now() when `timers` arrived
 let lastPlaybackEnd: number | null = null;
 
 // Hands-free (device wake=true): shared mic, wake word and VAD in one worker.
@@ -334,6 +336,9 @@ function handle(m: ServerMessage, binary: ArrayBuffer | null): void {
     case 'snapshot':
       conv = m.conv;
       alerts = Array.isArray(m.alerts) ? m.alerts : [];
+      timers = Array.isArray(m.timers) ? m.timers : [];
+      timersAt = performance.now();
+      showTimers();
       turn.onState({ conv: m.conv, turn: null });
       checkChime();
       break;
@@ -412,6 +417,14 @@ function onTap(): void {
       break;
   }
 }
+
+// Pending timers count down above the blob, so nobody has to ask how long is left.
+function showTimers(): void {
+  const el = $('timer');
+  el.textContent = timerText(timers, (performance.now() - timersAt) / 1000);
+  el.hidden = !el.textContent;
+}
+setInterval(showTimers, 250);
 
 let renderer: BlobRenderer | null = null;
 try {

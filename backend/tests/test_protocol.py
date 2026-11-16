@@ -61,6 +61,10 @@ def test_alert_item() -> None:
     assert set(schemas.AlertItem.model_fields) == set(PROTOCOL["alert_item"])
 
 
+def test_timer_item() -> None:
+    assert set(schemas.TimerItem.model_fields) == set(PROTOCOL["timer_item"])
+
+
 def test_timings_keys() -> None:
     assert set(schemas.Timings.model_fields) == {
         "stt_ms",

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from .auth import require_alert_token
 from .db import Db
-from .schemas import AlertIn, AlertItem, AlertOut
+from .schemas import AlertIn, AlertItem, AlertOut, TimerItem
 from .timer_rule import TimerRequest
 
 log = logging.getLogger(__name__)
@@ -78,6 +78,19 @@ class Alerts:
         """Active alerts for snapshot.alerts[], oldest first."""
         active = [a for a in self.rows.values() if a.state == "active"]
         return [a.item() for a in sorted(active, key=lambda a: (a.activated_at or 0, a.key))]
+
+    def timers(self) -> list[TimerItem]:
+        """Pending timers for snapshot.timers[], soonest first."""
+        now = self._wall()
+        due = [
+            a
+            for a in self.rows.values()
+            if a.state == "pending" and a.source == "timer" and a.fire_at
+        ]
+        return [
+            TimerItem(key=a.key, left_s=max(0.0, (a.fire_at or 0) - now))
+            for a in sorted(due, key=lambda a: (a.fire_at or 0, a.key))
+        ]
 
     def active(self, key: str) -> Alert | None:
         a = self.rows.get(key)

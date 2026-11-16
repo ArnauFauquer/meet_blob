@@ -1,5 +1,5 @@
 import { OVERLAY_MIN_MS } from './config';
-import type { AlertItem, ConvState, TurnDoneReason } from './protocol';
+import type { AlertItem, ConvState, TimerItem, TurnDoneReason } from './protocol';
 
 // What the renderer draws. 'offline' uses the error look (render/tables.ts);
 // 'alert' draws the top alert (topAlert) with the alert table.
@@ -54,4 +54,23 @@ export function setsOverlay(reason: TurnDoneReason): boolean {
 export function overlayActive(since: number | null, now: number, playing: boolean): boolean {
   if (since === null) return false;
   return playing || now - since < OVERLAY_MIN_MS;
+}
+
+// The countdown above the blob: the soonest TIMERS_SHOWN pending timers as m:ss
+// (h:mm:ss from an hour), then +N for the rest, so the line never reaches the
+// blob. `elapsedS` is the time since the snapshot arrived.
+export const TIMERS_SHOWN = 3;
+export function timerText(timers: readonly TimerItem[], elapsedS: number): string {
+  const more = timers.length - TIMERS_SHOWN;
+  const shown = timers
+    .slice(0, TIMERS_SHOWN)
+    .map((t) => {
+      const s = Math.max(0, Math.ceil(t.left_s - elapsedS));
+      const h = Math.floor(s / 3600);
+      const mm = Math.floor((s % 3600) / 60);
+      const ss = String(s % 60).padStart(2, '0');
+      return h ? `${h}:${String(mm).padStart(2, '0')}:${ss}` : `${mm}:${ss}`;
+    })
+    .join('  ·  ');
+  return more > 0 ? `${shown}  +${more}` : shown;
 }
