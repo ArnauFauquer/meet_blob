@@ -91,4 +91,10 @@ describe('timerText', () => {
     expect(timerText([{ key: 'a', left_s: 65 }], 5.5)).toBe('1:00');
     expect(timerText([{ key: 'a', left_s: 3 }, { key: 'b', left_s: 3725 }], 10)).toBe('0:00  ·  1:01:55');
   });
+
+  it('shows the soonest three, then +N', () => {
+    const t = [60, 120, 180, 240, 300].map((left_s, i) => ({ key: String(i), left_s }));
+    expect(timerText(t, 0)).toBe('1:00  ·  2:00  ·  3:00  +2');
+    expect(timerText(t.slice(0, 3), 0)).toBe('1:00  ·  2:00  ·  3:00');
+  });
 });
