@@ -12,7 +12,14 @@ dependencies = [
     "numpy",
     "faster-whisper",
     "kokoro-onnx",
-    "onnxruntime",
+    # Kokoro runs on the GPU in the image (KOKORO_DEVICE=cuda). onnxruntime-gpu 1.31 is built
+    # for CUDA 13 and loads cuDNN and the CUDA libraries from these pip wheels
+    # (onnxruntime.preload_dlls); its "cuda" extra leaves out cuBLAS. CTranslate2 keeps using
+    # the image's CUDA 12 cuBLAS: both runtimes load side by side. It also runs on the CPU, so
+    # CI and dev machines without a GPU use the same package. Other platforms get the CPU one.
+    "onnxruntime-gpu[cuda,cudnn]; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-cublas; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "onnxruntime; sys_platform != 'linux' or platform_machine != 'x86_64'",
 ]
 
 [project.scripts]
@@ -26,6 +33,19 @@ dev = [
     "ruff",
     "mypy",
     "websockets",
+]
+
+[tool.uv]
+# faster-whisper and kokoro-onnx require "onnxruntime"; on linux x86_64 onnxruntime-gpu provides
+# the same module, and both installed at once overwrite each other.
+override-dependencies = ["onnxruntime; sys_platform != 'linux' or platform_machine != 'x86_64'"]
+# kube1's driver (580) supports CUDA <= 13.0.
+constraint-dependencies = [
+    "nvidia-cuda-runtime==13.0.*",
+    "nvidia-cuda-nvrtc==13.0.*",
+    "nvidia-cublas==13.0.*",
+    "nvidia-cufft==12.0.*",
+    "nvidia-nvjitlink==13.0.*",
 ]
 
 [build-system]
