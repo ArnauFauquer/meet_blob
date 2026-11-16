@@ -22,6 +22,13 @@ export interface Pose {
 
 export const rest = (): Pose => ({ x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, sq: 0, gx: 0, gy: 0, lid: 0, happy: 0, smile: 0, mouth: 0 });
 
+// The pose scaled towards rest by w (1 unchanged, 0 rest).
+export function scaled(p: Pose, w: number): Pose {
+  const out = rest();
+  for (const k of Object.keys(out) as (keyof Pose)[]) out[k] = p[k] * w;
+  return out;
+}
+
 export interface Act {
   dur: number; // s
   pose: (u: number) => Partial<Pose>; // u: seconds into the act
@@ -173,7 +180,93 @@ export const ACTS: Record<string, Act> = {
   },
 };
 
-export type Mood = 'idle' | 'info' | 'urgent' | 'clock';
+// Thinking: the blob ponders, calculates, gets an idea... (the thinking look
+// already looks up and to the right; these poses add to it).
+Object.assign(ACTS, {
+  // "Hmm...": looks up to the other side, head tilted, eyes half shut, mouth flat.
+  ponder: {
+    dur: 3.2,
+    pose: (u) => {
+      const h = hold(u, 0.2, 0.7, 2.5, 3.1);
+      return { gx: -0.14 * h, gy: 0.04 * h, roll: (0.18 + 0.04 * wave(u, 0.8)) * h, pitch: -0.12 * h, lid: -0.35 * h, smile: -0.8 * h };
+    },
+  },
+  // Calculating: the eyes run left and right like reading lines, small ticks.
+  compute: {
+    dur: 2.8,
+    pose: (u) => {
+      const env = hold(u, 0, 0.2, 2.5, 2.8);
+      const step = Math.tanh(6 * wave(u, 2.5));
+      return { gx: 0.12 * step * env, gy: 0.04 * Math.cos(TAU * 0.6 * u) * env, yaw: 0.06 * step * env, y: 0.015 * Math.abs(wave(u, 5)) * env, lid: -0.2 * env, smile: -0.6 * env };
+    },
+  },
+  // Impatient foot tapping while it waits for the answer.
+  tap: {
+    dur: 2.4,
+    pose: (u) => {
+      const env = hold(u, 0, 0.2, 2.1, 2.4);
+      return { y: 0.025 * Math.max(0, wave(u, 4)) * env, roll: 0.04 * wave(u, 2) * env, gx: 0.1 * wave(u, 0.4) * env, lid: -0.15 * env };
+    },
+  },
+  // Loading: the body and the eyes go round like a spinner.
+  orbit: {
+    dur: 2.6,
+    pose: (u) => {
+      const env = hold(u, 0, 0.3, 2.2, 2.6);
+      const a = TAU * 1.2 * u;
+      return { x: 0.05 * Math.cos(a) * env, y: 0.05 * Math.sin(a) * env, roll: 0.08 * Math.sin(a) * env, gx: 0.1 * Math.cos(TAU * 1.5 * u) * env, gy: 0.07 * Math.sin(TAU * 1.5 * u) * env };
+    },
+  },
+  // Turns the idea over: one slow turn with the eyes shut.
+  turnIdea: {
+    dur: 3.0,
+    pose: (u) => ({ yaw: TAU * ramp(u, 0.3, 2.6), lid: -0.8 * hold(u, 0.2, 0.5, 2.4, 2.7), sq: -0.05 * hold(u, 0.3, 0.8, 2.2, 2.6) }),
+  },
+  // Effort: squeezes, trembles, then lets go.
+  strain: {
+    dur: 2.4,
+    pose: (u) => {
+      const h = hold(u, 0.2, 0.6, 1.7, 1.9);
+      return { sq: -0.1 * h, lid: -0.7 * h, smile: -1.0 * h, x: 0.012 * wave(u, 18) * h, roll: 0.02 * wave(u, 15) * h };
+    },
+    kicks: [[1.9, 3]],
+  },
+  // Got it! A squint, a pop and a jump, eyes wide, then pleased.
+  eureka: {
+    dur: 2.2,
+    pose: (u) => {
+      const squint = hold(u, 0, 0.3, 0.5, 0.58);
+      const glad = hold(u, 1.1, 1.3, 1.8, 2.2);
+      return {
+        lid: -0.5 * squint + 0.4 * hold(u, 0.55, 0.65, 1.1, 1.4),
+        sq: -0.08 * squint + 0.12 * arc(u, 0.55, 0.9),
+        y: 0.22 * arc(u, 0.55, 1.05),
+        mouth: 0.07 * hold(u, 0.55, 0.65, 0.9, 1.1),
+        happy: glad,
+        smile: 0.5 * glad,
+      };
+    },
+    kicks: [[0.55, 2.5], [1.05, -3.5]],
+  },
+  // Stares at the ceiling.
+  lookUp: {
+    dur: 2.6,
+    pose: (u) => {
+      const h = hold(u, 0.1, 0.5, 2.0, 2.6);
+      return { pitch: -0.3 * h, gy: 0.08 * h, gx: 0.06 * wave(u, 0.7) * h, roll: 0.05 * h };
+    },
+  },
+  // Overthinking: wobbles, eyes going round, wavy mouth.
+  dizzy: {
+    dur: 2.6,
+    pose: (u) => {
+      const env = hold(u, 0, 0.3, 2.2, 2.6);
+      return { roll: 0.15 * wave(u, 1.4) * env, x: 0.04 * wave(u, 0.7) * env, gx: 0.06 * Math.cos(TAU * 3 * u) * env, gy: 0.06 * Math.sin(TAU * 3 * u) * env, smile: -1.4 * env, mouth: 0.02 * env };
+    },
+  },
+} satisfies Record<string, Act>);
+
+export type Mood = 'idle' | 'info' | 'urgent' | 'clock' | 'thinking';
 
 // What each mood does, with weights, and the pause between two acts (s).
 export const REPERTOIRE: Record<Mood, { acts: [string, number][]; gap: [number, number] }> = {
@@ -186,6 +279,10 @@ export const REPERTOIRE: Record<Mood, { acts: [string, number][]; gap: [number, 
     gap: [1, 3],
   },
   urgent: { acts: [['panic', 3], ['peek', 2], ['hopHop', 2], ['spinJump', 1], ['backflip', 1]], gap: [0.5, 1.5] },
+  thinking: {
+    acts: [['ponder', 3], ['compute', 3], ['orbit', 2], ['tap', 2], ['lookUp', 2], ['turnIdea', 1], ['strain', 1], ['eureka', 1], ['dizzy', 1]],
+    gap: [0.2, 0.9],
+  },
   clock: { acts: [['hopHop', 2], ['wiggle', 2], ['curious', 1], ['spinJump', 1], ['backflip', 1]], gap: [7, 14] },
 };
 
@@ -196,7 +293,8 @@ const rnd = (n: number, k: number) => {
 };
 
 // Plays acts from the mood's repertoire, one at a time, with pauses between.
-// No mood: the current act finishes and no new one starts.
+// No mood: the act stops (blob.ts fades its last pose out) and none starts;
+// a new mood starts its first act soon.
 export class Actor {
   name: string | null = null;
   private act: Act | null = null;
@@ -204,6 +302,7 @@ export class Actor {
   private wait = 0.8; // until the next act
   private n = 0;
   private last = '';
+  private mood: Mood | null = null;
 
   play(name: string): void {
     this.name = this.last = name;
@@ -215,11 +314,13 @@ export class Actor {
   step(dt: number, mood: Mood | null): { pose: Pose; kick: number } {
     const pose = rest();
     let kick = 0;
+    if (mood !== this.mood) {
+      this.mood = mood;
+      this.wait = Math.min(this.wait, 0.4);
+      if (!mood) this.stop();
+    }
     if (!this.act) {
-      if (!mood) {
-        this.wait = Math.min(this.wait, 0.8); // act soon after the next change
-        return { pose, kick };
-      }
+      if (!mood) return { pose, kick };
       this.wait -= dt;
       if (this.wait > 0) return { pose, kick };
       this.play(this.pick(mood));
@@ -231,12 +332,16 @@ export class Actor {
     this.t += dt;
     for (const [at, v] of act.kicks ?? []) if (t0 <= at && at < this.t) kick += v;
     if (this.t >= act.dur) {
-      this.act = null;
-      this.name = null;
+      this.stop();
       return { pose, kick };
     }
     Object.assign(pose, act.pose(this.t));
     return { pose, kick };
+  }
+
+  private stop(): void {
+    this.act = null;
+    this.name = null;
   }
 
   get busy(): boolean {

@@ -44,12 +44,17 @@ describe('Actor', () => {
   it('is reproducible', () => {
     expect(run(new Actor(), 'info', 30).names).toEqual(run(new Actor(), 'info', 30).names);
   });
-  it('without a mood finishes the act and starts no new one', () => {
+  it('losing the mood stops the act and starts no new one', () => {
     const a = new Actor();
-    a.play('backflip');
+    run(a, 'idle', 1);
+    expect(a.busy).toBe(true);
     const { names } = run(a, null, 10);
-    expect(names).toEqual(['backflip']);
-    expect(a.busy).toBe(false);
+    expect(names).toEqual([]);
     expect(a.step(1 / 30, null).pose).toEqual(rest());
+  });
+  it('thinking acts soon and keeps acting', () => {
+    const { names } = run(new Actor(), 'thinking', 10);
+    expect(names.length).toBeGreaterThan(2);
+    for (const n of names) expect(REPERTOIRE.thinking.acts.map(([a]) => a)).toContain(n);
   });
 });

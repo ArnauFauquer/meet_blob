@@ -132,6 +132,8 @@ test('motion contact sheets', async ({ page }) => {
   await sheet(page, 'idle', false, 'act-look-around', 1, { act: 'lookAround', every: 6, frames: 24 });
   await sheet(page, 'idle', false, 'act-doze', 1, { act: 'doze', every: 6, frames: 24 });
   await sheet(page, 'alert', false, 'act-spin-triangle', 1, { alert: timer, act: 'spinJump', every: 3, frames: 18 });
+  // Thinking: random acts back to back (ponder, compute, eureka...), 0.25 s apart.
+  await sheet(page, 'thinking', false, 'thinking-acts', 1, { every: 8, frames: 36 });
   expect(await page.evaluate(() => (window as unknown as { blobDebug: { quality: number } }).blobDebug.quality)).toBe(2);
 });
 

@@ -133,9 +133,16 @@ float sphereShape(vec3 p) {
 // Alert shapes (S4). Rounded triangular prism (timer) and rounded box (other
 // sources), facing the camera with a slow sway so the flat faces catch the
 // light. They pulse with the breathing radius.
-float sdTriPrism(vec3 p, vec2 h) {
-  vec3 q = abs(p);
-  return max(q.z - h.y, max(q.x * 0.866025 + p.y * 0.5, -p.y) - h.x * 0.5);
+// Exact distance to an equilateral triangle prism (point up, inradius
+// r / sqrt(3), half depth h): exact, so subtracting a radius rounds every
+// edge and corner evenly.
+float sdTriPrism(vec3 p, float r, float h) {
+  const float k = 1.7320508;
+  vec2 q = vec2(abs(p.x) - r, p.y + r / k);
+  if (q.x + k * q.y > 0.0) q = vec2(q.x - k * q.y, -k * q.x - q.y) / 2.0;
+  q.x -= clamp(q.x, -2.0 * r, 0.0);
+  vec2 w = vec2(-length(q) * sign(q.y), abs(p.z) - h);
+  return min(max(w.x, w.y), 0.0) + length(max(w, 0.0));
 }
 
 float sdRoundBox(vec3 p, vec3 b, float r) {
@@ -159,11 +166,11 @@ vec2 alertShapes(vec3 p) {
   // Soft, well rounded bodies (a smaller core, a thick rounding) that still
   // read as a triangle and a square; the lava lobes push bumps out of their
   // faces and edges, and the sphere's slow ripples keep them liquid.
-  vec2 d = vec2(sdTriPrism(p + vec3(0.0, 0.15, 0.0), vec2(0.48, 0.12)) - 0.24,
+  vec2 d = vec2(sdTriPrism(p + vec3(0.0, 0.15, 0.0), 0.46, 0.14) - 0.17,
                 sdRoundBox(p, vec3(0.58, 0.58, 0.34), 0.3));
-  d.x = lobePush(d.x, p + vec3(0.0, 0.15, 0.0), vec3(0.6, 0.55, 0.45), 0.5);
+  d.x = lobePush(d.x, p + vec3(0.0, 0.15, 0.0), vec3(0.5, 0.42, 0.45), 0.42);
   d.y = lobePush(d.y, p, vec3(0.85, 0.8, 0.5), 0.5);
-  d += ripple(p) * 1.6 + (noise(p * 2.0 + vec3(0.0, uFlow * 0.6, 0.0)) - 0.5) * 0.03; // liquid shimmer
+  d += ripple(p) * 1.6;
   return d * s;
 }
 

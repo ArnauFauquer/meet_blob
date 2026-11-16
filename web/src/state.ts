@@ -56,10 +56,14 @@ export function overlayActive(since: number | null, now: number, playing: boolea
   return playing || now - since < OVERLAY_MIN_MS;
 }
 
-// The countdown above the blob: every pending timer as m:ss (h:mm:ss from an
-// hour), soonest first. `elapsedS` is the time since the snapshot arrived.
+// The countdown above the blob: the soonest TIMERS_SHOWN pending timers as m:ss
+// (h:mm:ss from an hour), then +N for the rest, so the line never reaches the
+// blob. `elapsedS` is the time since the snapshot arrived.
+export const TIMERS_SHOWN = 3;
 export function timerText(timers: readonly TimerItem[], elapsedS: number): string {
-  return timers
+  const more = timers.length - TIMERS_SHOWN;
+  const shown = timers
+    .slice(0, TIMERS_SHOWN)
     .map((t) => {
       const s = Math.max(0, Math.ceil(t.left_s - elapsedS));
       const h = Math.floor(s / 3600);
@@ -68,4 +72,5 @@ export function timerText(timers: readonly TimerItem[], elapsedS: number): strin
       return h ? `${h}:${String(mm).padStart(2, '0')}:${ss}` : `${mm}:${ss}`;
     })
     .join('  ·  ');
+  return more > 0 ? `${shown}  +${more}` : shown;
 }

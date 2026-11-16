@@ -16,7 +16,7 @@ import {
 import fragmentShader from './blob.frag?raw';
 import vertexShader from './blob.vert?raw';
 import { CLOCK_LOOK, LOBE_COUNT, SHAPE, alertLook, alertShape, clockDigits, lobes, lookFor, type Look } from './tables';
-import { Actor, type Mood } from './acts';
+import { Actor, rest, scaled, type Mood, type Pose } from './acts';
 import { morphMix, newTwirl, stepMorph, stepTwirl, type Morph } from './morph';
 import type { AlertItem } from '../protocol';
 import type { View } from '../state';
@@ -98,6 +98,8 @@ export class BlobRenderer {
   private twirl = newTwirl();
   private actor = new Actor();
   private actW = 0; // 0..1, an act is playing
+  private moodW = 0; // 0..1, acts are allowed (fades a cut act out)
+  private held: Pose = rest(); // the act's last pose
   private lean = 0; // jelly lean spring: top offset per unit of height
   private leanV = 0;
   private lastX = 0;
@@ -228,7 +230,7 @@ export class BlobRenderer {
     this.flashT = 0;
     this.blinkT = 0;
     this.blinkN = 1;
-    Object.assign(this, { t: 0, sq: 0, sqV: 0, twirl: newTwirl(), lastView: view, actor: new Actor(), actW: 0, lean: 0, leanV: 0, lastX: 0, lastVx: 0 });
+    Object.assign(this, { t: 0, sq: 0, sqV: 0, twirl: newTwirl(), lastView: view, actor: new Actor(), actW: 0, moodW: 0, held: rest(), lean: 0, leanV: 0, lastX: 0, lastVx: 0 });
     this.alertW = isAlertShape(shape) ? 1 : 0;
     this.urgentW = alert?.urgency === 'urgent' && view === 'alert' ? 1 : 0;
     this.clockW = shape === SHAPE.clock ? 1 : 0;
@@ -385,8 +387,12 @@ export class BlobRenderer {
         ? 'clock'
         : isAlertShape(shape)
           ? fi.alert?.urgency === 'urgent' ? 'urgent' : 'info'
-          : fi.view === 'idle' ? 'idle' : null;
-    const { pose: p, kick } = this.actor.step(dt, mood);
+          : fi.view === 'idle' || fi.view === 'thinking' ? fi.view : null;
+    const { pose: live, kick } = this.actor.step(dt, mood);
+    // An act cut short (a tap, a reply, a morph) fades out from its last pose.
+    this.moodW += ((mood ? 1 : 0) - this.moodW) * (1 - Math.exp(-dt / 0.15));
+    if (mood) this.held = live;
+    const p = mood ? live : scaled(this.held, this.moodW);
     if (kick) this.kick(kick);
     this.actW += ((this.actor.busy ? 1 : 0) - this.actW) * (1 - Math.exp(-dt / 0.2));
     const calm = 1 - this.actW; // the ambient motion yields to an act
