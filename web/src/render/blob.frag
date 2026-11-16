@@ -43,6 +43,14 @@ uniform vec3 uMouth;  // curvature (+ smile), opening, face strength
 uniform vec4 uDigits;     // the four digits shown
 uniform vec4 uDigitsPrev; // the digits before the last change
 uniform float uTick;      // 0..1, melts uDigitsPrev into uDigits
+uniform vec4 uDigitY;     // vertical bob of each digit (a slow wave across the clock)
+uniform float uColon;     // 0..1, the colon's beat once a second
+// Body motion (animateBody() in blob.ts): offset (hop, tremble), rotation
+// (twirl, sway, roll) from world to body, and the inverse of the squash and
+// stretch scale (taller or wider at the same volume).
+uniform vec3 uBodyPos;
+uniform mat3 uBodyRot;
+uniform vec3 uBodyInv;
 
 out vec4 fragColor;
 
@@ -76,6 +84,24 @@ float radius() {
 // blob.ts moves them (lobes() in tables.ts): they rise and sink on slow
 // cycles, so they pass, merge and split again. Quality uses the first LOBES.
 uniform vec4 uLobes[5];
+
+mat2 rot(float a) {
+  return mat2(cos(a), -sin(a), sin(a), cos(a));
+}
+
+// World point to the body frame: every shape is drawn there.
+vec3 body(vec3 p) {
+  return uBodyRot * (p - uBodyPos) * uBodyInv;
+}
+
+// Lava lobes pressing on a flat-faced shape from inside: the sphere's lobes,
+// squeezed by `sc` into the shape and shrunk to `rs`, so they bulge its faces
+// a little as they pass without hiding the shape. Three lobes are enough for
+// the bumps, and software GL pays for every shape on every step.
+float lobePush(float d, vec3 q, vec3 sc, float rs) {
+  for (int i = 0; i < 3; i++) d = smin(d, length(q - uLobes[i].xyz * sc) - uLobes[i].w * rs, 0.2);
+  return d;
+}
 
 // Slow ripples: three crossed sines, much cheaper than value noise.
 float ripple(vec3 p) {
@@ -118,7 +144,7 @@ float sdRoundBox(vec3 p, vec3 b, float r) {
 vec3 alertFrame(vec3 p) {
   p /= radius() / uRadius;
   float a = 0.35 * sin(uFlow * 0.6);
-  p.xz = mat2(cos(a), -sin(a), sin(a), cos(a)) * p.xz;
+  p.xz = rot(a) * p.xz;
   p.yz = mat2(0.98, -0.2, 0.2, 0.98) * p.yz;
   return p;
 }
@@ -129,6 +155,8 @@ vec2 alertShapes(vec3 p) {
   p = alertFrame(p);
   vec2 d = vec2(sdTriPrism(p + vec3(0.0, 0.15, 0.0), vec2(0.6, 0.2)) - 0.12,
                 sdRoundBox(p, vec3(0.6, 0.6, 0.32), 0.14));
+  d.x = lobePush(d.x, p + vec3(0.0, 0.2, 0.0), vec3(0.42, 0.4, 0.3), 0.36);
+  d.y = lobePush(d.y, p, vec3(0.6, 0.6, 0.35), 0.42);
   d += (noise(p * 2.0 + vec3(0.0, uFlow * 0.6, 0.0)) - 0.5) * 0.03; // liquid shimmer
   return d * s;
 }
@@ -144,7 +172,8 @@ float clockScale() {
 float clockShape(vec3 p) {
   float s = clockScale();
   p /= s;
-  return (sdRoundBox(p, vec3(1.2, 0.5, 0.3), 0.3) + ripple(p)) * s;
+  float d = lobePush(sdRoundBox(p, vec3(1.2, 0.5, 0.3), 0.3), p, vec3(2.2, 0.8, 0.9), 0.4);
+  return (d + ripple(p)) * s;
 }
 
 // Shape ids (SHAPE in tables.ts): 0 sphere, 1 triangle, 2 square, 3 clock.
@@ -156,6 +185,8 @@ bool isAlert(float id) {
   return id > 0.5 && id < 2.5;
 }
 
+// Distance in the body frame: main() marches the ray already moved into it
+// (the transform is affine, so the ray stays a line with the same t).
 float map(vec3 p) {
   bool morph = uMix > 0.001;
   // Each distance function appears once here (not once per shape slot), so the
@@ -340,7 +371,7 @@ float clockDist(vec2 q) {
   const vec2 hs = vec2(0.15, 0.32); // digit half size
   vec2 d = vec2(1e3); // x: the digits shown, y: the digits before
   for (int i = 0; i < 4; i++) {
-    vec2 c = q - vec2((float(i) - 1.5) * 0.48 + (i < 2 ? -0.22 : 0.22), 0.0);
+    vec2 c = q - vec2((float(i) - 1.5) * 0.48 + (i < 2 ? -0.22 : 0.22), uDigitY[i]);
     int now = SEG[clamp(int(uDigits[i] + 0.5), 0, 9)];
     int was = SEG[clamp(int(uDigitsPrev[i] + 0.5), 0, 9)];
     for (int s = 0; s < 7; s++) {
@@ -351,7 +382,7 @@ float clockDist(vec2 q) {
       if (((was >> s) & 1) == 1) d.y = min(d.y, ds);
     }
   }
-  float colon = length(vec2(q.x, abs(q.y) - 0.15)) - 0.012;
+  float colon = length(vec2(q.x, abs(q.y) - 0.15)) - 0.012 - 0.03 * uColon;
   return min(mix(d.y, d.x, smoothstep(0.0, 1.0, uTick)), colon) - 0.045;
 }
 
@@ -370,15 +401,17 @@ void main() {
 
   // Background: near black with a soft coloured glow bleeding out of the blob.
   float r = radius();
-  float b = -dot(ro, rd); // ray distance to the point closest to the centre
-  float closest = length(ro + rd * b);
+  vec3 rc = ro - uBodyPos; // the body moves; its glow and bound follow it
+  float b = -dot(rc, rd); // ray distance to the point closest to the centre
+  float closest = length(rc + rd * b);
   float out_ = max(closest - r, 0.0);
   vec3 col = vec3(0.0004, 0.0004, 0.0007);
   col += uColor * min(uGlow, 1.2) * (0.026 * exp(-out_ * 5.0) + 0.0025 * exp(-out_ * 1.8));
 
   // Bounding sphere: rays that miss it skip the march.
   float rb = (uShapeA > 2.5 || uShapeB > 2.5) ? 1.7 : r * 1.5 + 0.1; // the clock is wider
-  float h = b * b - (dot(ro, ro) - rb * rb);
+  rb /= min(uBodyInv.x, uBodyInv.y);
+  float h = b * b - (dot(rc, rc) - rb * rb);
   if (h > 0.0) {
     float t = b - sqrt(h);
     float tEnd = b + sqrt(h);
@@ -386,8 +419,13 @@ void main() {
     float d = 1.0;
     float near = 1e3; // closest pass of the ray, as distance over ray length
     float tNear = t;
+    // The ray in the body frame, same t. A body distance times k bounds the
+    // world distance: the squash stretches one axis.
+    vec3 bo = body(ro);
+    vec3 bd = uBodyRot * rd * uBodyInv;
+    float k = 1.0 / max(uBodyInv.x, uBodyInv.y);
     for (int i = 0; i < MARCH_STEPS; i++) {
-      d = map(ro + rd * t);
+      d = map(bo + bd * t) * k;
       if (d < 0.0013 * t) { hit = true; break; }
       if (d < near * t) { near = d / t; tNear = t; }
       t += d * mix(0.86, 0.6, uLevel); // the level swells break the distance bound a little
@@ -403,7 +441,10 @@ void main() {
     if (cov > 0.0) {
       if (!hit) t = tNear;
       vec3 p = ro + rd * t;
-      vec3 n = normalAt(p);
+      vec3 bp = bo + bd * t;
+      vec3 bn = normalAt(bp) * uBodyInv; // body gradient, back through the squash
+      vec3 n = normalize(transpose(uBodyRot) * bn);
+      bn = uBodyRot * n;
       float ndv = clamp(dot(n, -rd), 0.0, 1.0);
       float fr = pow(1.0 - ndv, 5.0);
       // Dark liquid metal: Schlick fresnel with a high base reflectance and a
@@ -421,22 +462,22 @@ void main() {
       // Just under the skin (lobes that push the surface glow through it) and,
       // deeper along the ray, dimmer lava further inside.
       // The samples add up, like light through a volume.
-      float heat = lavaHeat(lavaDist(p - n * r * 0.22, r, 1.0), r);
+      float heat = lavaHeat(lavaDist(bp - bn * r * 0.22, r, 1.0), r);
 #if QUALITY >= 2
-      heat += 0.85 * lavaHeat(lavaDist(p + rd * r * 0.85, r, 0.6), r); // same lobes, pulled inwards
+      heat += 0.85 * lavaHeat(lavaDist(bp + bd * r * 0.85, r, 0.6), r); // same lobes, pulled inwards
 #endif
       // The face, on the front only: a lava halo under the skin, then a near
       // white core drawn over the mirror, which goes dark around it. Light on
       // dark, so no reflection or lobe behind can hide the eyes.
       float face = 0.0;
       if (uMouth.z > 0.001) {
-        vec2 fq = faceSpace(p, uShapeA);
-        if (uMix > 0.001) fq = mix(fq, faceSpace(p, uShapeB), uMix);
+        vec2 fq = faceSpace(bp, uShapeA);
+        if (uMix > 0.001) fq = mix(fq, faceSpace(bp, uShapeB), uMix);
         float fd = faceDist(fq);
         // The face melts into the digits (and back) with the shape morph.
         float ck = (uShapeA > 2.5 ? 1.0 - uMix : 0.0) + (uShapeB > 2.5 ? uMix : 0.0);
         if (ck > 0.001) fd = mix(fd, clockDist(fq), ck);
-        float front = uMouth.z * smoothstep(0.0, 0.5, n.z);
+        float front = uMouth.z * smoothstep(0.0, 0.5, bn.z);
         heat += front * 0.4 * exp(-max(fd, 0.0) / 0.04);
         spec *= 1.0 - 0.75 * min(front, 1.0) * exp(-max(fd, 0.0) / 0.09);
         face = min(front, 1.0) * smoothstep(0.012, -0.012, fd);

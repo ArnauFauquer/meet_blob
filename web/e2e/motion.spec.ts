@@ -25,19 +25,32 @@ export function speechLevel(t: number): number {
   return Math.max(0, Math.min(1, 0.85 * edge * syl * stress));
 }
 
-async function sheet(page: Page, view: string, speech: boolean, name = view, dim = 1): Promise<void> {
+// Extra input for a sheet: the clock time, the alert, a view to start from
+// (a morph strip starts in `from` and switches to `view` at t=0) and the
+// number of 1/30 s steps per frame.
+interface SheetOpts {
+  clock?: string;
+  alert?: { source: string; urgency: 'info' | 'urgent' };
+  from?: string;
+  every?: number;
+  wide?: boolean; // 16:9 tiles, for the clock
+}
+
+async function sheet(page: Page, view: string, speech: boolean, name = view, dim = 1, o: SheetOpts = {}): Promise<void> {
   const png = await page.evaluate(
-    async ({ view, speech, frames, every, step, levelSrc, dim }) => {
+    async ({ view, speech, frames, every, step, levelSrc, dim, o }) => {
       const level = new Function(`return (${levelSrc})`)() as (t: number) => number;
       const d = (window as unknown as { blobDebug: Record<string, (...a: unknown[]) => void> }).blobDebug;
       const canvas = document.getElementById('blob') as HTMLCanvasElement;
       d.setDim(dim);
-      d.freeze(view);
+      d.freeze(o.from ?? view, o.clock, o.alert);
       const side = Math.round(canvas.height * 0.92);
+      const aspect = o.wide ? 16 / 9 : 1;
       const tile = 260;
-      const cols = 6;
+      const tileW = Math.round(tile * aspect);
+      const cols = o.wide ? 4 : 6;
       const out = document.createElement('canvas');
-      out.width = cols * tile;
+      out.width = cols * tileW;
       out.height = Math.ceil(frames / cols) * tile;
       const g = out.getContext('2d')!;
       g.fillStyle = '#000';
@@ -47,18 +60,20 @@ async function sheet(page: Page, view: string, speech: boolean, name = view, dim
       for (let f = 0; f < frames; f++) {
         for (let i = 0; i < every; i++) {
           t += step;
-          d.step(step, view, speech ? level(t) : 0, i === every - 1);
+          d.step(step, view, speech ? level(t) : 0, i === every - 1, o.clock, o.alert);
         }
         // Read the canvas in the same task as the draw (no preserveDrawingBuffer needed).
-        const x = (f % cols) * tile;
+        const x = (f % cols) * tileW;
         const y = Math.floor(f / cols) * tile;
-        g.drawImage(canvas, (canvas.width - side) / 2, (canvas.height - side) / 2, side, side, x, y, tile, tile);
+        const sw = Math.min(canvas.width, side * aspect);
+        const sh = sw / aspect;
+        g.drawImage(canvas, (canvas.width - sw) / 2, (canvas.height - sh) / 2, sw, sh, x, y, tileW, tile);
         g.fillStyle = 'rgba(255,255,255,0.55)';
         g.fillText(`${view} t=${t.toFixed(1)}s${speech ? ` lvl=${level(t).toFixed(2)}` : ''}${dim < 1 ? ` dim=${dim}` : ''}`, x + 6, y + 16);
       }
       return out.toDataURL('image/png');
     },
-    { view, speech, frames: FRAMES, every: EVERY, step: STEP_S, levelSrc: speechLevel.toString(), dim },
+    { view, speech, frames: FRAMES, every: o.every ?? EVERY, step: STEP_S, levelSrc: speechLevel.toString(), dim, o },
   );
   writeFileSync(`${OUT}${name}.png`, Buffer.from(png.split(',')[1], 'base64'));
 }
@@ -101,6 +116,13 @@ test('motion contact sheets', async ({ page }) => {
   await sheet(page, 'thinking', false);
   await sheet(page, 'error', false);
   await sheet(page, 'idle', false, 'idle-night-dim0.35', 0.35); // night dimming hook
+  const timer = { source: 'timer', urgency: 'info' } as const;
+  await sheet(page, 'idle', false, 'clock', 1, { clock: '2026-01-01T09:41', wide: true });
+  await sheet(page, 'alert', false, 'alert-timer-info', 1, { alert: timer });
+  await sheet(page, 'alert', false, 'alert-square-urgent', 1, { alert: { source: 'calendar', urgency: 'urgent' } });
+  // The morph from the blob to the timer triangle: hop, twirl, landing jiggle, 0.1 s apart.
+  await sheet(page, 'alert', false, 'morph-to-triangle', 1, { alert: timer, from: 'idle', every: 3 });
+  await sheet(page, 'idle', false, 'morph-to-clock', 1, { clock: '2026-01-01T09:41', from: 'listening', every: 3, wide: true });
   expect(await page.evaluate(() => (window as unknown as { blobDebug: { quality: number } }).blobDebug.quality)).toBe(2);
 });
 

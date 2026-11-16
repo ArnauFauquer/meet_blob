@@ -91,6 +91,20 @@ After 5 minutes of unbroken idle (`CLOCK_AFTER_MS`), the blob rests as a digital
 
 Screenshots: `docs/screenshots/clock-1280x800.png` and `-1024x768.png` show the time of the run.
 
+## Character: body motion
+
+The shapes used to sit still once a morph ended. `animateBody()` in `blob.ts` now moves the whole body, on top of the look. The shader marches the ray in the body frame (`body()`, `uBodyPos`, `uBodyRot`, `uBodyInv`), moved once per pixel, so `map()` costs the same as before.
+
+| What | How |
+|---|---|
+| Squash and stretch | A damped spring (2.6 Hz, damping ratio 0.22) at constant volume. Kicked by the crouch before a morph, the landing after it, every alert landing, each new minute on the clock and any other change of view. |
+| Morph | The body hops (0.22), stretches in the air and makes one full twirl (`stepTwirl()` in `morph.ts`). A morph reversed mid-way unwinds the twirl. |
+| Alerts | The triangle and the square jump with the pulse (sin > 0 is the air time) and rock from side to side. `urgent` also trembles. Three lava lobes press on their faces from inside (`lobePush()`), so the faces bulge as the lobes pass. |
+| Clock | It floats, rocks and sways a little. The digits ride a slow wave (`uDigitY`), the colon beats once a second (`uColon`), and the same lava lobes press on the pill. |
+| Eyes | Every 1.2 to 4 s the eyes dart to a new point, often back to the centre, in every state. |
+
+Contact sheets: `docs/screenshots/motion/clock.png`, `alert-timer-info.png`, `alert-square-urgent.png`, `morph-to-triangle.png` and `morph-to-clock.png`. Frame cost in SwiftShader at idle is unchanged (206 ms against 207 to 210 ms before).
+
 ## After the merge with main (S3/S4)
 
 - **Alerts.** Alerts use the same shading, with a lava colour from `ALERT_LAVA`. Their flat faces get stronger flowing ripples in the reflection (`faceted`), so they do not mirror one flat colour.
