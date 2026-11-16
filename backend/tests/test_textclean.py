@@ -1,6 +1,6 @@
 import pytest
 
-from blob.textclean import clean_for_speech, ends_with_question, truncate_for_speech
+from blob.textclean import clean_for_speech, ends_with_question, say_units, truncate_for_speech
 
 
 @pytest.mark.parametrize(
@@ -58,3 +58,23 @@ def test_decimal_point_is_not_a_sentence_end() -> None:
 )
 def test_ends_with_question(text: str, expected: bool) -> None:
     assert ends_with_question(text) is expected
+
+
+@pytest.mark.parametrize(
+    ("text", "lang", "spoken"),
+    [
+        ("Consume 3680 W.", "es", "Consume 3680 vatios."),
+        ("16 A a 230 V", "es", "16 amperios a 230 voltios"),
+        ("Entre 20,7 y 23,8 ºC, 21°C fuera", "es", "Entre 20,7 y 23,8 grados, 21 grados fuera"),
+        ("1 kWh y 1 W", "es", "1 kilovatio hora y 1 vatio"),
+        ("A 50 km/h, hasta 600 €.", "es", "A 50 kilómetros por hora, hasta 600 euros."),
+        ("Son las 14:30, 9:05 o 8:00.", "es", "Son las 14 y 30, 9 y 5 o 8 en punto."),
+        ("It's 14:30, 9:05 or 8:00.", "en-us", "It's 14 30, 9 oh 5 or 8 o'clock."),
+        ("Uses 87 W and 2 A", "en-us", "Uses 87 watts and 2 amps"),
+        # Left alone: ordinals, words that start with a unit letter, ratios, IDs and long clocks.
+        ("Es el 1º, 2 Avenida, 4 Wifi", "es", "Es el 1º, 2 Avenida, 4 Wifi"),
+        ("3 W/m2, v1.2 V, 10:30:15, A1 W", "es", "3 W/m2, v1.2 V, 10:30:15, A1 W"),
+    ],
+)
+def test_say_units(text: str, lang: str, spoken: str) -> None:
+    assert say_units(text, lang) == spoken

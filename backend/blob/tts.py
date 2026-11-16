@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from .audio import wav_bytes
+from .textclean import say_units
 from .voices import FALLBACK_LINES, fallback_lang, voice_for
 
 log = logging.getLogger(__name__)
@@ -63,6 +64,8 @@ class KokoroTts:
 
     def __call__(self, text: str, lang: str | None) -> bytes:
         voice = voice_for(lang)
-        samples, rate = self._kokoro.create(text, voice=voice.name, speed=1.0, lang=voice.lang)
+        samples, rate = self._kokoro.create(
+            say_units(text, voice.lang), voice=voice.name, speed=1.0, lang=voice.lang
+        )
         self.rate = rate
         return wav_bytes(samples, rate)
