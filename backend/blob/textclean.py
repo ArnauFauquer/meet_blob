@@ -18,6 +18,78 @@ _SENTENCE_END = re.compile(r"[.!?…](?=\s|$)")
 _TRAILING_QUOTES = "\"'»”\u2019)] \t\n"
 
 
+# Unit symbols after a number, as words: (singular, plural). espeak spells the symbols
+# letter by letter ("3680 W" -> "uve doble"). Bare "º" is left alone: in Spanish it is
+# usually an ordinal ("1º").
+_UNITS: dict[str, dict[str, tuple[str, str]]] = {
+    "es": {
+        "kWh": ("kilovatio hora", "kilovatios hora"),
+        "Wh": ("vatio hora", "vatios hora"),
+        "kW": ("kilovatio", "kilovatios"),
+        "W": ("vatio", "vatios"),
+        "mA": ("miliamperio", "miliamperios"),
+        "A": ("amperio", "amperios"),
+        "V": ("voltio", "voltios"),
+        "°C": ("grado", "grados"),
+        "ºC": ("grado", "grados"),
+        "°": ("grado", "grados"),
+        "km/h": ("kilómetro por hora", "kilómetros por hora"),
+        "km": ("kilómetro", "kilómetros"),
+        "cm": ("centímetro", "centímetros"),
+        "mm": ("milímetro", "milímetros"),
+        "kg": ("kilo", "kilos"),
+        "€": ("euro", "euros"),
+    },
+    "en": {
+        "kWh": ("kilowatt hour", "kilowatt hours"),
+        "Wh": ("watt hour", "watt hours"),
+        "kW": ("kilowatt", "kilowatts"),
+        "W": ("watt", "watts"),
+        "mA": ("milliamp", "milliamps"),
+        "A": ("amp", "amps"),
+        "V": ("volt", "volts"),
+        "°C": ("degree", "degrees"),
+        "ºC": ("degree", "degrees"),
+        "°": ("degree", "degrees"),
+        "km/h": ("kilometer per hour", "kilometers per hour"),
+        "km": ("kilometer", "kilometers"),
+        "cm": ("centimeter", "centimeters"),
+        "mm": ("millimeter", "millimeters"),
+        "kg": ("kilogram", "kilograms"),
+        "€": ("euro", "euros"),
+    },
+}
+_UNIT = re.compile(
+    r"(?<![\w.,])(\d+(?:[.,]\d+)?) ?("
+    + "|".join(re.escape(u) for u in sorted(_UNITS["es"], key=len, reverse=True))
+    + r")(?![\w/])"
+)
+_CLOCK = re.compile(r"(?<![\w:])([01]?\d|2[0-3]):([0-5]\d)(?![\w:])")
+
+
+def say_units(text: str, lang: str) -> str:
+    """Spell unit symbols after numbers and HH:MM times as words, for espeak's lang ("es", "en-us").
+
+    Numbers stay digits: espeak reads them well in both languages.
+    """
+    en = lang.startswith("en")
+    units = _UNITS["en" if en else "es"]
+
+    def unit(m: re.Match[str]) -> str:
+        one, many = units[m[2]]
+        return f"{m[1]} {one if m[1] == '1' else many}"
+
+    def clock(m: re.Match[str]) -> str:
+        h, mm = m[1], m[2]
+        if mm == "00":
+            return f"{h} o'clock" if en else f"{h} en punto"
+        if en:
+            return f"{h} {mm}" if mm[0] != "0" else f"{h} oh {mm[1]}"
+        return f"{h} y {int(mm)}"
+
+    return _CLOCK.sub(clock, _UNIT.sub(unit, text))
+
+
 def clean_for_speech(text: str) -> str:
     """Remove markdown markers, emoji and URLs, and collapse whitespace."""
     text = _MD_LINK.sub(r"\1", text)
