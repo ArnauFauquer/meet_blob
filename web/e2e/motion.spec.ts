@@ -34,6 +34,8 @@ interface SheetOpts {
   from?: string;
   every?: number;
   wide?: boolean; // 16:9 tiles, for the clock
+  act?: string; // an act to start at t=0 (ACTS in render/acts.ts)
+  frames?: number;
 }
 
 async function sheet(page: Page, view: string, speech: boolean, name = view, dim = 1, o: SheetOpts = {}): Promise<void> {
@@ -44,6 +46,7 @@ async function sheet(page: Page, view: string, speech: boolean, name = view, dim
       const canvas = document.getElementById('blob') as HTMLCanvasElement;
       d.setDim(dim);
       d.freeze(o.from ?? view, o.clock, o.alert);
+      if (o.act) d.act(o.act);
       const side = Math.round(canvas.height * 0.92);
       const aspect = o.wide ? 16 / 9 : 1;
       const tile = 260;
@@ -73,7 +76,7 @@ async function sheet(page: Page, view: string, speech: boolean, name = view, dim
       }
       return out.toDataURL('image/png');
     },
-    { view, speech, frames: FRAMES, every: o.every ?? EVERY, step: STEP_S, levelSrc: speechLevel.toString(), dim, o },
+    { view, speech, frames: o.frames ?? FRAMES, every: o.every ?? EVERY, step: STEP_S, levelSrc: speechLevel.toString(), dim, o },
   );
   writeFileSync(`${OUT}${name}.png`, Buffer.from(png.split(',')[1], 'base64'));
 }
@@ -123,6 +126,12 @@ test('motion contact sheets', async ({ page }) => {
   // The morph from the blob to the timer triangle: hop, twirl, landing jiggle, 0.1 s apart.
   await sheet(page, 'alert', false, 'morph-to-triangle', 1, { alert: timer, from: 'idle', every: 3 });
   await sheet(page, 'idle', false, 'morph-to-clock', 1, { clock: '2026-01-01T09:41', from: 'listening', every: 3, wide: true });
+  // Acts at rest, 0.1 s apart.
+  const square = { source: 'calendar', urgency: 'info' } as const;
+  await sheet(page, 'alert', false, 'act-backflip-square', 1, { alert: square, act: 'backflip', every: 3, frames: 24 });
+  await sheet(page, 'idle', false, 'act-look-around', 1, { act: 'lookAround', every: 6, frames: 24 });
+  await sheet(page, 'idle', false, 'act-doze', 1, { act: 'doze', every: 6, frames: 24 });
+  await sheet(page, 'alert', false, 'act-spin-triangle', 1, { alert: timer, act: 'spinJump', every: 3, frames: 18 });
   expect(await page.evaluate(() => (window as unknown as { blobDebug: { quality: number } }).blobDebug.quality)).toBe(2);
 });
 

@@ -45,12 +45,15 @@ uniform vec4 uDigitsPrev; // the digits before the last change
 uniform float uTick;      // 0..1, melts uDigitsPrev into uDigits
 uniform vec4 uDigitY;     // vertical bob of each digit (a slow wave across the clock)
 uniform float uColon;     // 0..1, the colon's beat once a second
-// Body motion (animateBody() in blob.ts): offset (hop, tremble), rotation
-// (twirl, sway, roll) from world to body, and the inverse of the squash and
-// stretch scale (taller or wider at the same volume).
+// Body motion (animateBody() in blob.ts): the body's offset (hops, acts) and
+// the linear map from world to body: turns and flips, the jelly lean and the
+// squash and stretch, all in one matrix. uBodyK turns a body distance into a
+// safe world distance (1 / largest stretch of uBody); uBodyR grows the
+// bounding sphere (1 / smallest).
 uniform vec3 uBodyPos;
-uniform mat3 uBodyRot;
-uniform vec3 uBodyInv;
+uniform mat3 uBody;
+uniform float uBodyK;
+uniform float uBodyR;
 
 out vec4 fragColor;
 
@@ -91,7 +94,7 @@ mat2 rot(float a) {
 
 // World point to the body frame: every shape is drawn there.
 vec3 body(vec3 p) {
-  return uBodyRot * (p - uBodyPos) * uBodyInv;
+  return uBody * (p - uBodyPos);
 }
 
 // Lava lobes pressing on a flat-faced shape from inside: the sphere's lobes,
@@ -99,7 +102,7 @@ vec3 body(vec3 p) {
 // a little as they pass without hiding the shape. Three lobes are enough for
 // the bumps, and software GL pays for every shape on every step.
 float lobePush(float d, vec3 q, vec3 sc, float rs) {
-  for (int i = 0; i < 3; i++) d = smin(d, length(q - uLobes[i].xyz * sc) - uLobes[i].w * rs, 0.2);
+  for (int i = 0; i < 3; i++) d = smin(d, length(q - uLobes[i].xyz * sc) - uLobes[i].w * rs, 0.22);
   return d;
 }
 
@@ -153,11 +156,14 @@ vec3 alertFrame(vec3 p) {
 vec2 alertShapes(vec3 p) {
   float s = radius() / uRadius;
   p = alertFrame(p);
-  vec2 d = vec2(sdTriPrism(p + vec3(0.0, 0.15, 0.0), vec2(0.6, 0.2)) - 0.12,
-                sdRoundBox(p, vec3(0.6, 0.6, 0.32), 0.14));
-  d.x = lobePush(d.x, p + vec3(0.0, 0.2, 0.0), vec3(0.42, 0.4, 0.3), 0.36);
-  d.y = lobePush(d.y, p, vec3(0.6, 0.6, 0.35), 0.42);
-  d += (noise(p * 2.0 + vec3(0.0, uFlow * 0.6, 0.0)) - 0.5) * 0.03; // liquid shimmer
+  // Soft, well rounded bodies (a smaller core, a thick rounding) that still
+  // read as a triangle and a square; the lava lobes push bumps out of their
+  // faces and edges, and the sphere's slow ripples keep them liquid.
+  vec2 d = vec2(sdTriPrism(p + vec3(0.0, 0.15, 0.0), vec2(0.48, 0.12)) - 0.24,
+                sdRoundBox(p, vec3(0.58, 0.58, 0.34), 0.3));
+  d.x = lobePush(d.x, p + vec3(0.0, 0.15, 0.0), vec3(0.6, 0.55, 0.45), 0.5);
+  d.y = lobePush(d.y, p, vec3(0.85, 0.8, 0.5), 0.5);
+  d += ripple(p) * 1.6 + (noise(p * 2.0 + vec3(0.0, uFlow * 0.6, 0.0)) - 0.5) * 0.03; // liquid shimmer
   return d * s;
 }
 
@@ -410,7 +416,7 @@ void main() {
 
   // Bounding sphere: rays that miss it skip the march.
   float rb = (uShapeA > 2.5 || uShapeB > 2.5) ? 1.7 : r * 1.5 + 0.1; // the clock is wider
-  rb /= min(uBodyInv.x, uBodyInv.y);
+  rb *= uBodyR;
   float h = b * b - (dot(rc, rc) - rb * rb);
   if (h > 0.0) {
     float t = b - sqrt(h);
@@ -422,8 +428,8 @@ void main() {
     // The ray in the body frame, same t. A body distance times k bounds the
     // world distance: the squash stretches one axis.
     vec3 bo = body(ro);
-    vec3 bd = uBodyRot * rd * uBodyInv;
-    float k = 1.0 / max(uBodyInv.x, uBodyInv.y);
+    vec3 bd = uBody * rd;
+    float k = uBodyK;
     for (int i = 0; i < MARCH_STEPS; i++) {
       d = map(bo + bd * t) * k;
       if (d < 0.0013 * t) { hit = true; break; }
@@ -442,9 +448,8 @@ void main() {
       if (!hit) t = tNear;
       vec3 p = ro + rd * t;
       vec3 bp = bo + bd * t;
-      vec3 bn = normalAt(bp) * uBodyInv; // body gradient, back through the squash
-      vec3 n = normalize(transpose(uBodyRot) * bn);
-      bn = uBodyRot * n;
+      vec3 bn = normalAt(bp); // normal in the body frame (face, lava)
+      vec3 n = normalize(transpose(uBody) * bn); // the gradient back in the world
       float ndv = clamp(dot(n, -rd), 0.0, 1.0);
       float fr = pow(1.0 - ndv, 5.0);
       // Dark liquid metal: Schlick fresnel with a high base reflectance and a

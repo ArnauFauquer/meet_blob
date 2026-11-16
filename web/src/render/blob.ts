@@ -1,6 +1,8 @@
 import {
+  Euler,
   GLSL3,
   Matrix3,
+  Matrix4,
   Mesh,
   OrthographicCamera,
   PlaneGeometry,
@@ -14,6 +16,7 @@ import {
 import fragmentShader from './blob.frag?raw';
 import vertexShader from './blob.vert?raw';
 import { CLOCK_LOOK, LOBE_COUNT, SHAPE, alertLook, alertShape, clockDigits, lobes, lookFor, type Look } from './tables';
+import { Actor, type Mood } from './acts';
 import { morphMix, newTwirl, stepMorph, stepTwirl, type Morph } from './morph';
 import type { AlertItem } from '../protocol';
 import type { View } from '../state';
@@ -43,6 +46,17 @@ const SQUASH_HZ = 2.6;
 const SQUASH_DAMP = 0.22; // damping ratio: a few visible jiggles
 const HOP = 0.22; // morph hop height (the blob radius is 0.78)
 const isAlertShape = (s: number) => s === SHAPE.triangle || s === SHAPE.square;
+const LEAN_HZ = 2.2;
+
+// Largest stretch of a 3x3 map (its top singular value), by power iteration.
+const v3 = new Vector3();
+const ata = new Matrix3();
+function largestStretch(m: Matrix3): number {
+  ata.copy(m).transpose().multiply(m);
+  v3.set(0.6, 0.7, 0.4);
+  for (let i = 0; i < 12; i++) v3.applyMatrix3(ata).normalize();
+  return Math.sqrt(v3.applyMatrix3(ata).length());
+}
 
 export interface FrameInput {
   view: View;
@@ -82,6 +96,17 @@ export class BlobRenderer {
   private sq = 0; // squash spring: + stretches tall, - squashes wide
   private sqV = 0;
   private twirl = newTwirl();
+  private actor = new Actor();
+  private actW = 0; // 0..1, an act is playing
+  private lean = 0; // jelly lean spring: top offset per unit of height
+  private leanV = 0;
+  private lastX = 0;
+  private lastVx = 0;
+  private readonly euler = new Euler();
+  private readonly rot = new Matrix4();
+  private readonly shear = new Matrix3();
+  private readonly scale = new Matrix3();
+  private readonly inv = new Matrix3();
   private alertW = 0; // 0..1 weight of the alert bounce
   private urgentW = 0; // 0..1 weight of the urgent tremble
   private clockW = 0; // 0..1 weight of the clock float
@@ -132,8 +157,9 @@ export class BlobRenderer {
         uDigitsPrev: { value: new Vector4() },
         uTick: { value: 1 },
         uBodyPos: { value: new Vector3() },
-        uBodyRot: { value: new Matrix3() },
-        uBodyInv: { value: new Vector3(1, 1, 1) },
+        uBody: { value: new Matrix3() },
+        uBodyK: { value: 1 },
+        uBodyR: { value: 1 },
         uDigitY: { value: new Vector4() },
         uColon: { value: 0 },
       },
@@ -202,7 +228,7 @@ export class BlobRenderer {
     this.flashT = 0;
     this.blinkT = 0;
     this.blinkN = 1;
-    Object.assign(this, { t: 0, sq: 0, sqV: 0, twirl: newTwirl(), lastView: view });
+    Object.assign(this, { t: 0, sq: 0, sqV: 0, twirl: newTwirl(), lastView: view, actor: new Actor(), actW: 0, lean: 0, leanV: 0, lastX: 0, lastVx: 0 });
     this.alertW = isAlertShape(shape) ? 1 : 0;
     this.urgentW = alert?.urgency === 'urgent' && view === 'alert' ? 1 : 0;
     this.clockW = shape === SHAPE.clock ? 1 : 0;
@@ -307,6 +333,11 @@ export class BlobRenderer {
     this.animateBody(dt, fi, shape, wasMorphing, phase0);
   }
 
+  // Debug and film strips: start an act now (names in ACTS, acts.ts).
+  play(name: string): void {
+    this.actor.play(name);
+  }
+
   private kick(v: number): void {
     this.sqV += v;
   }
@@ -347,18 +378,51 @@ export class BlobRenderer {
     stepTwirl(this.twirl, m);
     const air = morphing ? Math.sin(Math.PI * m.t) : 0;
 
-    const bounce = Math.max(0, Math.sin(phase));
-    const hop = HOP * air + this.alertW * (0.1 - 0.03 * this.urgentW) * bounce + this.clockW * 0.035 * Math.sin(t * 0.8);
-    const shake = this.urgentW * (0.011 * Math.sin(t * 47) + 0.007 * Math.sin(t * 31 + 1.3));
-    (u.uBodyPos.value as Vector3).set(shake, hop, 0);
-    const roll = this.alertW * 0.09 * Math.sin(t * 1.3) * (1 - 0.5 * this.urgentW) + this.urgentW * 0.03 * Math.sin(t * 39) + this.clockW * 0.035 * Math.sin(t * 0.53);
-    // World to body: yaw (twirl, sway) then roll, as rows.
-    const yaw = this.twirl.angle + this.clockW * 0.14 * Math.sin(t * 0.37);
-    const [cy, sy, cr, sr] = [Math.cos(yaw), Math.sin(yaw), Math.cos(roll), Math.sin(roll)];
-    (u.uBodyRot.value as Matrix3).set(cr * cy, sr, cr * sy, -sr * cy, cr, -sr * sy, -sy, 0, cy);
-    // Squash and stretch at constant volume, sent inverted (the shader divides by it).
-    const st = 1 + Math.max(-0.3, Math.min(0.3, this.sq + 0.16 * air + this.alertW * 0.05 * bounce));
-    (u.uBodyInv.value as Vector3).set(Math.sqrt(st), 1 / st, Math.sqrt(st));
+    // Acts at rest (acts.ts): only once the shape has settled.
+    const mood: Mood | null = morphing
+      ? null
+      : shape === SHAPE.clock
+        ? 'clock'
+        : isAlertShape(shape)
+          ? fi.alert?.urgency === 'urgent' ? 'urgent' : 'info'
+          : fi.view === 'idle' ? 'idle' : null;
+    const { pose: p, kick } = this.actor.step(dt, mood);
+    if (kick) this.kick(kick);
+    this.actW += ((this.actor.busy ? 1 : 0) - this.actW) * (1 - Math.exp(-dt / 0.2));
+    const calm = 1 - this.actW; // the ambient motion yields to an act
+
+    const bounce = Math.max(0, Math.sin(phase)) * calm;
+    const hop = HOP * air + this.alertW * (0.1 - 0.03 * this.urgentW) * bounce + this.clockW * 0.035 * Math.sin(t * 0.8) + p.y;
+    const shake = this.urgentW * calm * (0.011 * Math.sin(t * 47) + 0.007 * Math.sin(t * 31 + 1.3));
+    const x = shake + p.x;
+    (u.uBodyPos.value as Vector3).set(x, hop, p.z);
+    const roll =
+      (this.alertW * 0.09 * Math.sin(t * 1.3) * (1 - 0.5 * this.urgentW) + this.urgentW * 0.03 * Math.sin(t * 39) + this.clockW * 0.035 * Math.sin(t * 0.53)) * calm + p.roll;
+    const yaw = this.twirl.angle + this.clockW * 0.14 * Math.sin(t * 0.37) * calm + p.yaw;
+
+    // Jelly lean: the top lags behind sideways moves, on its own spring.
+    const vx = dt > 0 ? (x - this.lastX) / dt : 0;
+    const ax = dt > 0 ? (vx - this.lastVx) / dt : 0;
+    this.lastX = x;
+    this.lastVx = vx;
+    const lw = 2 * Math.PI * LEAN_HZ;
+    for (let i = 0; i < n; i++) {
+      const h = dt / n;
+      this.leanV += (-lw * lw * this.lean - 2 * 0.3 * lw * this.leanV - ax * 0.4) * h;
+      this.lean += this.leanV * h;
+    }
+    this.lean = Math.max(-0.25, Math.min(0.25, this.lean));
+
+    // World to body: undo the lean (x - lean * y), then the turn (yaw, pitch,
+    // roll), then the squash and stretch at constant volume.
+    const st = 1 + Math.max(-0.3, Math.min(0.35, this.sq + 0.16 * air + this.alertW * 0.05 * bounce + p.sq));
+    this.euler.set(p.pitch, yaw, roll, 'YXZ');
+    const body = (u.uBody.value as Matrix3).setFromMatrix4(this.rot.makeRotationFromEuler(this.euler)).transpose();
+    body.multiply(this.shear.set(1, -this.lean, 0, 0, 1, 0, 0, 0, 1));
+    body.premultiply(this.scale.set(Math.sqrt(st), 0, 0, 0, 1 / st, 0, 0, 0, Math.sqrt(st)));
+    const big = largestStretch(body);
+    u.uBodyK.value = 1 / big;
+    u.uBodyR.value = largestStretch(this.inv.copy(body).invert());
 
     // Clock: the digits ride a slow wave, the colon beats once a second.
     const dy = u.uDigitY.value as Vector4;
@@ -377,7 +441,17 @@ export class BlobRenderer {
     g.x += ((centre ? 0 : (rnd(g.n, 2) - 0.5) * 0.16) - g.x) * gk;
     g.y += ((centre ? 0 : (rnd(g.n, 3) - 0.5) * 0.08) - g.y) * gk;
     const gaze = u.uGaze.value as Vector2;
-    gaze.x += g.x;
-    gaze.y += g.y;
+    gaze.x += g.x * calm + p.gx;
+    gaze.y += g.y * calm + p.gy;
+
+    // The act's expression on top of the state's face.
+    const eyes = u.uEyes.value as Vector4;
+    // A long close stops at 0.03: a flatter ellipse leaves a faint line across the blob.
+    eyes.y = Math.max(Math.min(eyes.y, 0.03), eyes.y * (1 + p.lid));
+    const glad = mood !== 'urgent'; // an urgent alert never looks pleased
+    eyes.w = Math.max(0, Math.min(1, eyes.w + (glad ? p.happy : 0)));
+    const mouth = u.uMouth.value as Vector3;
+    mouth.x += glad ? p.smile : Math.min(0, p.smile);
+    mouth.y += p.mouth;
   }
 }

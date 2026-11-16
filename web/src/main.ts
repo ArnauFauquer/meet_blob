@@ -549,6 +549,10 @@ window.blobDebug = {
   },
   // Screenshot scripts only. No view: hold the current frame (a mid-morph
   // capture). With a view: stop and restart that view's motion at zero (film strip).
+  // Starts a little act now (names in ACTS, render/acts.ts).
+  act(name: string) {
+    renderer?.play(name);
+  },
   freeze(v?: View, clock?: string, alert?: FrameInput['alert']) {
     if (v) renderer?.freeze(v, clock ? new Date(clock) : null, alert);
     else renderer?.stop();
