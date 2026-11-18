@@ -42,13 +42,13 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app/backend
 # Dependencies first (cached layer), then the project itself. uv is bind-mounted, not installed.
-RUN --mount=from=ghcr.io/astral-sh/uv:0.13.8,source=/uv,target=/bin/uv \
+RUN --mount=from=ghcr.io/astral-sh/uv:0.13.9,source=/uv,target=/bin/uv \
     --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=backend/pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=backend/uv.lock,target=uv.lock \
     uv sync --frozen --no-dev --no-install-project
 COPY backend/ ./
-RUN --mount=from=ghcr.io/astral-sh/uv:0.13.8,source=/uv,target=/bin/uv \
+RUN --mount=from=ghcr.io/astral-sh/uv:0.13.9,source=/uv,target=/bin/uv \
     --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable \
  && rm -rf /app/backend
