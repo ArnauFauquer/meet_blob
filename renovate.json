@@ -1,0 +1,10 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "packageRules": [
+    {
+      "description": "Python comes from Ubuntu 24.04 in the image (apt python3.12), and onnxruntime and CTranslate2 only ship wheels for some versions. Change backend/.python-version, requires-python and the Dockerfile together by hand.",
+      "matchDepNames": ["python"],
+      "enabled": false
+    }
+  ]
+}
