@@ -6,7 +6,7 @@ uv run python scripts/stt_cli.py tests/clips/es.wav [--model small] [--compute i
 import argparse
 import time
 
-from blob.audio import read_wav, resample
+from blob.audio import PCM_RATE, read_wav, resample
 from blob.stt import WhisperStt, is_empty
 
 
@@ -24,7 +24,7 @@ def main() -> None:
     print(f"load: {time.perf_counter() - t0:.1f} s")
     samples, rate = read_wav(a.wav)
     t0 = time.perf_counter()
-    r = stt(resample(samples, rate, 16000))
+    r = stt(resample(samples, rate, PCM_RATE))
     print(f"text: {r.text!r}")
     empty = is_empty(r, a.no_speech_max)
     print(f"lang: {r.lang}  no_speech_prob: {r.no_speech_prob:.3f}  empty: {empty}")

@@ -32,7 +32,7 @@ import numpy as np
 from e2e_turn import open_session, wav_info
 from websockets.sync.client import ClientConnection
 
-from blob.audio import read_wav, to_pcm16k
+from blob.audio import PCM_RATE, read_wav, to_pcm16k
 
 results: list[tuple[str, bool, str]] = []
 
@@ -64,6 +64,12 @@ def snapshot_where(cond: Callable[[dict[str, Any]], bool]) -> Callable[[Any], bo
 
 def keys(snap: dict[str, Any]) -> set[str]:
     return {a["key"] for a in snap["alerts"]}
+
+
+def alert_in(snap: dict[str, Any] | None, key: str) -> dict[str, Any]:
+    """The snapshot's alert with this key, or {} (no snapshot, or not in it)."""
+    found: dict[str, Any] = next((a for a in snap["alerts"] if a["key"] == key), {}) if snap else {}
+    return found
 
 
 def main() -> int:
@@ -107,7 +113,7 @@ def alerts_flow(api: httpx.Client, page: ClientConnection, mirror: ClientConnect
     for name, ws in (("page", page), ("mirror", mirror)):
         snap = wait_for(ws, snapshot_where(lambda s: key in keys(s)), 5)
         ms = round((time.monotonic() - sent) * 1000)
-        item = next((x for x in snap["alerts"] if x["key"] == key), {}) if snap else {}
+        item = alert_in(snap, key)
         check(
             f"snapshot on {name} within 1 s",
             snap is not None and ms < 1000 and item.get("urgency") == "urgent",
@@ -152,7 +158,7 @@ def timer_flow(api: httpx.Client, page: ClientConnection) -> None:
     check("timer pending", r.status_code == 201 and r.json()["state"] == "pending", r.text)
     snap = wait_for(page, snapshot_where(lambda s: key in keys(s)), 6)
     secs = time.monotonic() - posted
-    item = next((x for x in snap["alerts"] if x["key"] == key), {}) if snap else {}
+    item = alert_in(snap, key)
     check(
         "timer fires, snapshot changes",
         snap is not None and 1.0 <= secs <= 3.5 and item.get("late") is False,
@@ -170,11 +176,15 @@ def voice_timer_flow(api: httpx.Client, page: ClientConnection, a: argparse.Name
         samples, rate = read_wav(a.timer_wav)
         pcm = to_pcm16k(samples, rate)
     else:
-        pcm = (np.ones(16000, dtype="<i2") * 3000).tobytes()
+        pcm = (np.ones(PCM_RATE, dtype="<i2") * 3000).tobytes()  # 1 s, loud enough for FakeStt
     page.send(json.dumps({"type": "tap"}))
-    st = wait_for(page, lambda m: isinstance(m, dict) and m["type"] in ("state", "error"), 10)
+
+    def state_or_error(m: Any) -> bool:
+        return isinstance(m, dict) and m["type"] in ("state", "error")
+
+    st = wait_for(page, state_or_error, 10)
     while st is not None and st["type"] == "state" and st["conv"] != "listening":
-        st = wait_for(page, lambda m: isinstance(m, dict) and m["type"] in ("state", "error"), 10)
+        st = wait_for(page, state_or_error, 10)
     if not st or st["type"] != "state":
         check("voice timer turn", False, f"tap refused: {st}")
         return
@@ -182,8 +192,8 @@ def voice_timer_flow(api: httpx.Client, page: ClientConnection, a: argparse.Name
         "type": "utterance",
         "turn": st["turn"],
         "format": "pcm_s16le",
-        "rate": 16000,
-        "dur_ms": len(pcm) // 32,
+        "rate": PCM_RATE,
+        "dur_ms": len(pcm) * 1000 // (2 * PCM_RATE),
         "tail_silence_ms": 500,
     }
     page.send(json.dumps(header))

@@ -44,10 +44,6 @@ export class BlobSocket {
     this.connect();
   }
 
-  get isReady(): boolean {
-    return this.ready;
-  }
-
   // Sends a JSON message and, when given, its binary frame right after it.
   send(msg: ClientMessage, binary?: ArrayBuffer): boolean {
     if (!this.ws || !this.ready || this.ws.readyState !== WebSocket.OPEN) return false;

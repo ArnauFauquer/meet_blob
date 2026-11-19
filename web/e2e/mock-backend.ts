@@ -84,16 +84,23 @@ const sendBinary = (c: Conn, m: object, bin: Buffer) => {
   send(c, m);
   if (c.ws.readyState === c.ws.OPEN) c.ws.send(bin);
 };
+// Pending timers, soonest first, as the real backend lists them in snapshot.timers.
+const pendingTimers = () =>
+  [...alerts.values()]
+    .filter((a) => a.state === 'pending' && a.source === 'timer' && a.fire_at !== null)
+    .sort((a, b) => (a.fire_at ?? 0) - (b.fire_at ?? 0) || (a.key < b.key ? -1 : 1))
+    .map((a) => ({ key: a.key, left_s: Math.max(0, (a.fire_at ?? 0) - Date.now() / 1000) }));
+const snapshot = () => ({ type: 'snapshot', conv, alerts: activeAlerts(), timers: pendingTimers() });
 function setConv(next: typeof conv, id: number | null) {
   conv = next;
   for (const c of conns) {
     if (!c.hello) continue;
     send(c, { type: 'state', conv, turn: id });
-    send(c, { type: 'snapshot', conv, alerts: activeAlerts() });
+    send(c, snapshot());
   }
 }
 function broadcastSnapshot() {
-  for (const c of conns) if (c.hello) send(c, { type: 'snapshot', conv, alerts: activeAlerts() });
+  for (const c of conns) if (c.hello) send(c, snapshot());
 }
 function activate(a: Alert) {
   a.state = 'active';
@@ -176,7 +183,7 @@ function onMessage(c: Conn, data: RawData, isBinary: boolean) {
     c.hello = true;
     c.device = c.session;
     send(c, { type: 'hello_ok', version: c.device === 'version' ? 'mock-other-version' : m.version, ok: true });
-    send(c, { type: 'snapshot', conv, alerts: activeAlerts() });
+    send(c, snapshot());
     if (c.device === 'drop' && !dropped.has(c.device)) {
       dropped.add(c.device);
       setTimeout(() => c.ws.terminate(), 300);
@@ -313,7 +320,7 @@ async function alertsApi(req: IncomingMessage, res: ServerResponse, url: URL) {
     const key = decodeURIComponent(url.pathname.slice('/alerts/'.length));
     const a = alerts.get(key);
     clearTimeout(a?.timer);
-    if (alerts.delete(key) && a?.state === 'active') broadcastSnapshot();
+    if (alerts.delete(key) && a?.state !== 'acked') broadcastSnapshot();
     return res.writeHead(204).end();
   }
   if (req.method !== 'POST' || url.pathname !== '/alerts') return res.writeHead(405).end();
@@ -344,8 +351,10 @@ async function alertsApi(req: IncomingMessage, res: ServerResponse, url: URL) {
     fire_at: inS > 0 ? Math.floor(Date.now() / 1000) + inS : null,
   };
   alerts.set(key, a);
-  if (inS > 0) a.timer = setTimeout(() => activate(a), inS * 1000);
-  else activate(a);
+  if (inS > 0) {
+    a.timer = setTimeout(() => activate(a), inS * 1000);
+    broadcastSnapshot(); // the countdown shows the pending timer
+  } else activate(a);
   res.writeHead(old ? 200 : 201);
   return res.end(JSON.stringify({ key, state: a.state, fire_at: a.fire_at }));
 }

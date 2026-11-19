@@ -91,10 +91,10 @@ async def test_timer_added_while_sleeping_is_seen_within_cap(path: Path) -> None
         await woke.wait()
         await r.post(key="t", source="timer", text="t", in_s=2)
         r.wall.now = NOW + 2
-        for _ in range(100):
+        for _ in range(200):  # the SQLite write runs in a thread before the mirror changes
             if r.state("t") == "active":
                 break
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.01)
         assert r.state("t") == "active"
         assert delays and max(delays) <= SLEEP_CAP_S
     finally:
@@ -118,6 +118,32 @@ async def test_scheduler_survives_a_failing_tick(path: Path) -> None:
     with pytest.raises(asyncio.CancelledError):
         await run_scheduler(r.alerts, sleep)
     assert calls == [SLEEP_CAP_S, SLEEP_CAP_S]
+
+
+async def test_a_failed_write_leaves_the_mirror_as_the_database(path: Path) -> None:
+    r = Rig(path)
+    await r.post(key="t", source="timer", text="t", in_s=10)
+    await r.post(key="a", source="s", text="t")
+    write = r.db.write_alerts
+
+    async def broken(*_: object) -> None:
+        raise OSError("disk full")
+
+    r.db.write_alerts = broken  # type: ignore[method-assign]
+    r.wall.now = NOW + 10
+    with pytest.raises(OSError):
+        await r.alerts.tick()
+    with pytest.raises(OSError):
+        await r.alerts.ack("a")
+    with pytest.raises(OSError):
+        await r.alerts.delete("a")
+    assert (r.state("t"), r.state("a")) == ("pending", "active")
+
+    r.db.write_alerts = write  # type: ignore[method-assign]
+    await r.alerts.tick()  # the next tick retries the activation
+    assert r.state("t") == "active"
+    saved = {row["key"]: row["state"] for row in r.db.load_alerts()}
+    assert saved == {"t": "active", "a": "active"}
 
 
 async def test_ttl_counts_from_activation(path: Path) -> None:

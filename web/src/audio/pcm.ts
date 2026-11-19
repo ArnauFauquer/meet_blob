@@ -1,7 +1,18 @@
 // Pure PCM helpers shared by the capture worklet and the main thread.
+import { PCM_RATE } from '../protocol';
 
-export const OUT_RATE = 16_000;
+export const OUT_RATE = PCM_RATE;
 export const WINDOW_SAMPLES = 320; // 20 ms at 16 kHz
+
+export const msToSamples = (ms: number) => Math.round((ms * OUT_RATE) / 1000);
+export const samplesToMs = (n: number) => Math.round((n * 1000) / OUT_RATE);
+
+// RMS of 16-bit samples, in 0..1 of full scale (0 for no samples).
+export function rmsS16(pcm: Int16Array): number {
+  let sum = 0;
+  for (let i = 0; i < pcm.length; i++) sum += (pcm[i] / 0x8000) ** 2;
+  return pcm.length ? Math.sqrt(sum / pcm.length) : 0;
+}
 
 // Streaming resampler to 16 kHz mono. It averages the input samples that fall
 // in each output step (a box filter, enough against aliasing for speech at
@@ -56,7 +67,7 @@ export class Recorder {
   private readonly silenceRms: number;
 
   constructor(capMs: number, silenceRms: number) {
-    this.cap = (capMs * OUT_RATE) / 1000;
+    this.cap = msToSamples(capMs);
     this.silenceRms = silenceRms;
   }
 
@@ -81,7 +92,7 @@ export class Recorder {
     }
     return {
       pcm,
-      durMs: Math.round((pcm.length * 1000) / OUT_RATE),
+      durMs: samplesToMs(pcm.length),
       tailSilenceMs: tailSilenceMs(pcm, this.silenceRms),
     };
   }
@@ -92,16 +103,10 @@ export class Recorder {
 export function tailSilenceMs(pcm: Int16Array, silenceRms: number): number {
   const windows = Math.floor(pcm.length / WINDOW_SAMPLES);
   for (let w = windows - 1; w >= 0; w--) {
-    let sum = 0;
-    for (let i = w * WINDOW_SAMPLES; i < (w + 1) * WINDOW_SAMPLES; i++) {
-      const v = pcm[i] / 0x8000;
-      sum += v * v;
-    }
-    if (Math.sqrt(sum / WINDOW_SAMPLES) > silenceRms) {
-      return Math.round(((pcm.length - (w + 1) * WINDOW_SAMPLES) * 1000) / OUT_RATE);
-    }
+    const end = (w + 1) * WINDOW_SAMPLES;
+    if (rmsS16(pcm.subarray(end - WINDOW_SAMPLES, end)) > silenceRms) return samplesToMs(pcm.length - end);
   }
-  return Math.round((pcm.length * 1000) / OUT_RATE);
+  return samplesToMs(pcm.length);
 }
 
 // RMS of an analyser's time-domain buffer, mapped to 0..1 for the shader.

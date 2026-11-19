@@ -25,7 +25,6 @@ def test_defaults(tmp_path: Path) -> None:
     assert (s.stt_model, s.stt_compute, s.kokoro_device) == ("large-v3", "int8_float16", "cpu")
     assert (s.no_speech_max, s.silence_rms, s.tts_max_chars) == (0.6, 0.01, 1200)
     assert (s.retention_days, s.host, s.port) == (14, "0.0.0.0", 8000)
-    assert s.hermes_history_mode == "session"
     assert (s.followup_listen_s, s.listen_no_speech_s, s.quiet_hours) == (6, 8, "")
     assert (s.followup_max, s.timer_rule) == (3, True)
 
@@ -72,7 +71,6 @@ def test_required(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
     "override",
     [
         {"hermes_url": "hermes:8642"},
-        {"hermes_history_mode": "replay"},
         {"hermes_total_s": 0},
         {"no_speech_max": 1.5},
         {"port": 0},

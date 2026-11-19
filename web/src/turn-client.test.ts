@@ -55,6 +55,21 @@ describe('TurnClient', () => {
     expect(mic.start).toHaveBeenCalledTimes(1);
   });
 
+  it('a cancel while a new turn is requested never names the previous turn', () => {
+    const { tc, sent } = setup();
+    tc.startTurn();
+    tc.onState({ conv: 'listening', turn: 4 });
+    tc.onTurnDone({ type: 'turn_done', turn: 4, reason: 'ok', timeout_kind: null, timings: { stt_ms: null, hermes_ms: null, tts_ms: null, first_audio_ms: null, sc1_ms: null } });
+    sent.length = 0;
+    tc.startTurn();
+    tc.cancel();
+    expect(sent.filter(([m]) => m.type === 'cancel')).toEqual([]);
+    expect(tc.phase).toBe('requested'); // the new turn's state still opens it
+    tc.onState({ conv: 'listening', turn: 5 });
+    expect(tc.turn).toBe(5);
+    expect(tc.phase).toBe('listening');
+  });
+
   it('a double tap before the state arrives sends one tap', () => {
     const { tc, sent } = setup();
     tc.startTurn();

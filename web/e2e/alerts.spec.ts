@@ -146,3 +146,15 @@ test('alert synthesis fails: the alert stays, the beep plays, no alert_ack (mock
     await page.request.delete('/alerts/ttsfail-1', { headers: { Authorization: 'Bearer alert-token' } });
   }
 });
+
+test('a pending timer counts down above the blob and goes when deleted', async ({ page }) => {
+  await openBlob(page, 'e2e-timer-countdown');
+  await waitView(page, 'idle');
+  const key = await alerts.post('countdown', { source: 'timer', in_s: 120 });
+  const timer = page.locator('#timer');
+  await expect(timer).toBeVisible();
+  await expect(timer).toHaveText(/^(2:00|1:5\d)$/);
+  await alerts.del(key);
+  await expect(timer).toBeHidden();
+  expect(await dbg(page, 'view')).toBe('idle'); // still pending: no alert shown
+});

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Capture } from './capture';
 import { OUT_RATE, Recorder, Resampler, levelOf, tailSilenceMs, toS16 } from './pcm';
 
 const tone = (n: number, amp = 0.5, rate = OUT_RATE, f = 200) =>
@@ -71,5 +72,37 @@ describe('levelOf', () => {
     expect(levelOf(new Float32Array(64))).toBe(0);
     expect(levelOf(Float32Array.from({ length: 64 }, () => 1))).toBe(1);
     expect(levelOf(tone(1600, 0.1))).toBeCloseTo(0.283, 2);
+  });
+});
+
+describe('Capture', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('opens one microphone stream when a turn starts while the shared stream is still opening', async () => {
+    const grants: ((s: MediaStream) => void)[] = [];
+    const gum = vi.fn(() => new Promise<MediaStream>((r) => grants.push(r)));
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: gum } });
+    vi.stubGlobal(
+      'AudioWorkletNode',
+      class {
+        port = { onmessage: null };
+        connect() {}
+        disconnect() {}
+      },
+    );
+    const node = () => ({ connect: vi.fn(), disconnect: vi.fn(), fftSize: 0 });
+    const ctx = {
+      audioWorklet: { addModule: vi.fn(() => Promise.resolve()) },
+      createMediaStreamSource: node,
+      createAnalyser: node,
+      destination: {},
+    } as unknown as AudioContext;
+    const cap = new Capture(ctx, 15_000, 0.01);
+    const shared = cap.openShared();
+    const turn = cap.start(() => {});
+    await vi.waitFor(() => expect(gum).toHaveBeenCalled());
+    for (const grant of grants) grant({ getTracks: () => [], getAudioTracks: () => [] } as unknown as MediaStream);
+    await Promise.all([shared, turn]);
+    expect(gum).toHaveBeenCalledTimes(1);
   });
 });

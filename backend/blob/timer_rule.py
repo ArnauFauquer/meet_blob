@@ -11,9 +11,10 @@ from .voices import fallback_lang
 
 _TIMER = re.compile(r"\b(?:temporizador(?:es)?|temporitzador(?:s)?|timers?)\b")
 # Cancel, change, ask-about and negation words: those requests go to Hermes. ("para" is not
-# here: in Spanish it also means "for", as in "un temporizador para 5 minutos".)
+# here: in Spanish it also means "for", as in "un temporizador para 5 minutos". "cancel\w*" also
+# covers "cancela" and Catalan "cancel·la".)
 _NOT_A_NEW_TIMER = re.compile(
-    r"\b(?:cancela\w*|cancel·la\w*|cancel\.la\w*|cancel\w*|quita\w*|borra\w*|elimina\w*|"
+    r"\b(?:cancel\w*|quita\w*|borra\w*|elimina\w*|"
     r"parar|det[eé]n\w*|apaga\w*|cambia\w*|canvia\w*|modifica\w*|atura\w*|esborra\w*|treu\w*|"
     r"stop\w*|delete\w*|remove\w*|clear\w*|change\w*|cu[aá]nto|quant|queda\w*|how|left|"
     r"no|not|don'?t|never)\b"

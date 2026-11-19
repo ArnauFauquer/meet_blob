@@ -178,11 +178,9 @@ export const ACTS: Record<string, Act> = {
       return { x: 0.06 * wave(u, 7) * env, roll: 0.15 * Math.sin(TAU * 7 * u + 0.5) * env, y: 0.06 * Math.abs(wave(u, 3.5)) * env, lid: 0.35 * env, mouth: 0.05 * env };
     },
   },
-};
 
-// Thinking: the blob ponders, calculates, gets an idea... (the thinking look
-// already looks up and to the right; these poses add to it).
-Object.assign(ACTS, {
+  // Thinking: the blob ponders, calculates, gets an idea... (the thinking look
+  // already looks up and to the right; these poses add to it).
   // "Hmm...": looks up to the other side, head tilted, eyes half shut, mouth flat.
   ponder: {
     dur: 3.2,
@@ -264,7 +262,7 @@ Object.assign(ACTS, {
       return { roll: 0.15 * wave(u, 1.4) * env, x: 0.04 * wave(u, 0.7) * env, gx: 0.06 * Math.cos(TAU * 3 * u) * env, gy: 0.06 * Math.sin(TAU * 3 * u) * env, smile: -1.4 * env, mouth: 0.02 * env };
     },
   },
-} satisfies Record<string, Act>);
+};
 
 export type Mood = 'idle' | 'info' | 'urgent' | 'clock' | 'thinking';
 
@@ -306,7 +304,7 @@ export class Actor {
 
   play(name: string): void {
     this.name = this.last = name;
-    this.act = ACTS[name];
+    this.act = ACTS[name] ?? null;
     this.t = 0;
   }
 
@@ -327,7 +325,8 @@ export class Actor {
       const [lo, hi] = REPERTOIRE[mood].gap;
       this.wait = lo + (hi - lo) * rnd(this.n, 7);
     }
-    const act = this.act!;
+    const act = this.act;
+    if (!act) return { pose, kick }; // play() was given an unknown name
     const t0 = this.t;
     this.t += dt;
     for (const [at, v] of act.kicks ?? []) if (t0 <= at && at < this.t) kick += v;

@@ -8,6 +8,7 @@ the few kinds the blob can draw (a sun, a moon, a cloud, rain, snow, a storm, fo
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from typing import Any, Literal
 
 import httpx
@@ -93,7 +94,7 @@ class WeatherService:
         refresh_s: float,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
-        wall: Any = time.time,
+        wall: Callable[[], float] = time.time,
     ) -> None:
         self.lat = lat
         self.lon = lon

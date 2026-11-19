@@ -6,22 +6,28 @@ import wave
 import numpy as np
 from numpy.typing import NDArray
 
+PCM_RATE = 16000  # what the page sends: 16 kHz mono signed 16-bit little-endian
+
 
 def pcm_to_float(pcm: bytes) -> NDArray[np.float32]:
     """Little-endian signed 16-bit PCM to float samples in [-1, 1]."""
     return np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
 
 
-def wav_bytes(samples: NDArray[np.floating], rate: int) -> bytes:
-    """Mono float samples to a 16-bit WAV file."""
-    pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2")
+def pcm_wav(pcm: bytes, rate: int) -> bytes:
+    """Little-endian signed 16-bit mono PCM wrapped in a WAV file."""
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(rate)
-        w.writeframes(pcm.tobytes())
+        w.writeframes(pcm)
     return buf.getvalue()
+
+
+def wav_bytes(samples: NDArray[np.floating], rate: int) -> bytes:
+    """Mono float samples to a 16-bit WAV file."""
+    return pcm_wav((np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes(), rate)
 
 
 def tone_wav(seconds: float = 0.4, freq: float = 440.0, rate: int = 24000) -> bytes:
@@ -48,6 +54,6 @@ def resample(samples: NDArray[np.float32], src: int, dst: int) -> NDArray[np.flo
 
 
 def to_pcm16k(samples: NDArray[np.float32], rate: int) -> bytes:
-    """What the page sends: little-endian signed 16-bit mono PCM at 16 kHz."""
-    out = resample(samples, rate, 16000)
+    """What the page sends: little-endian signed 16-bit mono PCM at PCM_RATE."""
+    out = resample(samples, rate, PCM_RATE)
     return (np.clip(out, -1.0, 1.0) * 32767).astype("<i2").tobytes()

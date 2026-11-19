@@ -9,13 +9,12 @@ and delete the folder.
 
 import logging
 import time
-import wave
 from collections.abc import Callable
 from pathlib import Path
 
-log = logging.getLogger(__name__)
+from .audio import PCM_RATE, pcm_wav
 
-PCM_RATE = 16000  # the utterance format: 16 kHz mono signed 16-bit little-endian
+log = logging.getLogger(__name__)
 
 
 class AudioDump:
@@ -46,11 +45,7 @@ class AudioDump:
             t = self._wall()
             stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime(t)) + f"{int(t * 1000) % 1000:03d}"
             path = folder / f"{stamp}_{name}.wav"
-            with wave.open(str(path), "wb") as w:
-                w.setnchannels(1)
-                w.setsampwidth(2)
-                w.setframerate(PCM_RATE)
-                w.writeframes(pcm)
+            path.write_bytes(pcm_wav(pcm, PCM_RATE))
             for old in sorted(folder.glob("*.wav"))[:-keep]:
                 old.unlink(missing_ok=True)
             log.info("debug audio: saved %s (%d ms)", path.name, len(pcm) * 1000 // (2 * PCM_RATE))

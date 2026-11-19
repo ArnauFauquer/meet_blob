@@ -44,7 +44,7 @@ def frames(oww: Model, name: str, path: str, offset: int = 0) -> tuple[np.ndarra
     a = np.concatenate([pad, a, pad])[offset:]
     oww.reset()
     scores, feats = [], []
-    for i in range(0, len(a) - CHUNK, CHUNK):
+    for i in range(0, len(a) - CHUNK + 1, CHUNK):
         scores.append(oww.predict(a[i : i + CHUNK])[name])
         feats.append(oww.preprocessor.get_features(16).reshape(-1))
     return np.array(scores), np.array(feats)
@@ -57,7 +57,7 @@ def clip_features(oww: Model, name: str, path: str, positive: bool, gate: float)
         s, f = frames(oww, name, path, offset)
         keep = s >= max(gate, 0.5 * s.max()) if positive else s >= gate * 0.5
         out.append(f[keep])
-    return np.vstack(out) if out else np.empty((0, 16 * 96))
+    return np.vstack(out)
 
 
 def main() -> None:
@@ -79,6 +79,7 @@ def main() -> None:
     oww = Model(wakeword_models=[args.model], inference_framework="onnx")
     name = next(iter(oww.models))
     pos, neg = wavs(args.pos), wavs(args.neg)
+    positive = set(pos)
     print(f"{len(pos)} positive clips, {len(neg)} negative clips")
     feats = {p: clip_features(oww, name, p, True, args.gate) for p in pos}
     feats |= {p: clip_features(oww, name, p, False, args.gate) for p in neg}
@@ -92,7 +93,7 @@ def main() -> None:
 
     def fit(train: list[str]) -> tuple[StandardScaler, LogisticRegression]:
         x = np.vstack([feats[p] for p in train])
-        y = np.concatenate([np.full(len(feats[p]), p in set(pos), float) for p in train])
+        y = np.concatenate([np.full(len(feats[p]), p in positive, float) for p in train])
         sc = StandardScaler().fit(x)
         sc.scale_[sc.scale_ == 0] = 1.0
         lr = LogisticRegression(C=args.c, max_iter=5000, class_weight="balanced").fit(
@@ -111,8 +112,9 @@ def main() -> None:
     held = {}
     for k in range(5):
         test = [clips[i] for i in order[k::5]]
-        train = [p for p in clips if p not in set(test)]
-        if not any(p in set(pos) for p in train) or not any(p not in set(pos) for p in train):
+        held_out = set(test)
+        train = [p for p in clips if p not in held_out]
+        if not any(p in positive for p in train) or not any(p not in positive for p in train):
             continue
         sc, lr = fit(train)
         held |= {p: clip_score(sc, lr, p) for p in test}

@@ -2,10 +2,7 @@
 // backend has DEBUG_AUDIO_DIR set): the audio around each attempt the wake word
 // heard, and in enrollment mode (?enroll=pos|neg) every spoken phrase.
 
-import { PCM_RATE } from '../protocol';
-
-export const msToSamples = (ms: number) => Math.round((ms * PCM_RATE) / 1000);
-export const samplesToMs = (n: number) => Math.round((n * 1000) / PCM_RATE);
+import { WINDOW_SAMPLES, msToSamples, rmsS16 } from '../audio/pcm';
 
 // The last `capacity` samples of 16 kHz audio.
 export class PcmRing {
@@ -50,12 +47,6 @@ export const SEG = {
   prerollMs: 300, // audio kept before the start
 };
 
-function rmsOf(pcm: Int16Array): number {
-  let sum = 0;
-  for (let i = 0; i < pcm.length; i++) sum += (pcm[i] / 32768) ** 2;
-  return pcm.length ? Math.sqrt(sum / pcm.length) : 0;
-}
-
 // Enrollment: cuts the microphone audio into spoken phrases by loudness over an
 // adaptive noise floor, so "hey blob ... hey blob ..." gives one clip per phrase.
 export class PhraseSegmenter {
@@ -69,9 +60,9 @@ export class PhraseSegmenter {
   // One block of audio; returns a finished phrase (pre-roll included), if any.
   push(pcm: Int16Array): Int16Array | null {
     this.ring.push(pcm);
-    const rms = rmsOf(pcm);
+    const rms = rmsS16(pcm);
     if (rms < this.floor) this.floor = Math.max(rms, 1e-5);
-    else if (this.speech === 0) this.floor *= 1.002 ** (pcm.length / 320); // creeps up about 10 % per second
+    else if (this.speech === 0) this.floor *= 1.002 ** (pcm.length / WINDOW_SAMPLES); // creeps up about 10 % per second
 
     if (this.capped) {
       if (rms < Math.max(this.floor * SEG.keepRatio, SEG.minRms)) this.quiet += pcm.length;

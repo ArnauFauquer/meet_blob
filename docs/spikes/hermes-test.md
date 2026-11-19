@@ -23,7 +23,7 @@
 
 ## What this changes in the design
 
-*   **History:** the `session` mode (send `X-Hermes-Session-Id` and only the new message) works. Set `HERMES_HISTORY_MODE=session`. The `replay` mode is not needed for now.
+*   **History:** the `session` mode (send `X-Hermes-Session-Id` and only the new message) works. It is the only mode Blob builds (no setting). The `replay` mode is not needed for now.
 *   **Reply timing:** a plain turn takes about 3 s of Hermes time, which fits the loose 6 s target for SC1 once speech-to-text (about 1 s, unmeasured) and synthesis are added. A turn where Hermes searches memory or uses tools takes 8 s or more and will miss it. The filler phrase (deferred) becomes more useful than assumed.
 *   **Cost:** every turn spends about 17,000 input tokens of the subscription quota (prompt caching lowers repeat cost; unverified). A reduced Hermes profile or toolset for Blob is worth testing before daily use.
 *   **Memory is shared:** anything said to Blob can be remembered by Hermes and shown in other sessions. This matches the "memory is per profile, not per speaker" caveat. Test A put "my name is Arnau, favourite colour green" into Hermes's memory; that is harmless but it is now there.

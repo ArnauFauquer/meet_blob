@@ -3,7 +3,7 @@
 import asyncio
 import time
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from importlib.resources import files
 
 import httpx
@@ -25,7 +25,7 @@ SKILL = (files(__package__) / "hermes_skill.md").read_text(encoding="utf-8")
 def system_message(alerts_url: str, now: float) -> str:
     """SYSTEM_MESSAGE, the Blob skill, and the local time (the skill needs it for fire_at)."""
     t = datetime.fromtimestamp(now).astimezone()
-    offset = int(t.utcoffset().total_seconds())  # type: ignore[union-attr]  # astimezone() always sets it
+    offset = int((t.utcoffset() or timedelta()).total_seconds())  # astimezone() always sets it
     return (
         f"{SYSTEM_MESSAGE}\n\n{SKILL.replace('{alerts_url}', alerts_url)}\n"
         f"Current time: {t.isoformat(timespec='seconds')} ({t:%A}), epoch {int(now)}, "

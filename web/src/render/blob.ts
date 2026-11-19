@@ -36,7 +36,7 @@ import { morphMix, newTwirl, stepMorph, stepTwirl, type Morph } from './morph';
 import type { AlertItem } from '../protocol';
 import type { View } from '../state';
 
-export const RENDER_SCALE = 0.75;
+const RENDER_SCALE = 0.75;
 const CALM_FRAME_MS = 1000 / 30; // idle (and error, offline, alert) is capped at 30 fps
 const EASE_S = 0.6; // time constant of the state crossfade
 // Quality tiers (QUALITY define in blob.frag): 2 full, 1 fewer march steps,
@@ -136,7 +136,6 @@ function targetOf(i: FrameInput): { look: Look; shape: number } {
 // One fullscreen quad with the blob shader. The caller gives the view and the
 // level each frame through `input`.
 export class BlobRenderer {
-  readonly canvas: HTMLCanvasElement;
   frameMs = 0; // interval between the last two frames, for the diagnostics view only
   maxLevel = 0; // highest level uniform since the last reset (e2e check)
   lost = false;
@@ -145,7 +144,7 @@ export class BlobRenderer {
   private readonly camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private readonly material: RawShaderMaterial;
   private readonly cur: Look;
-  readonly morph: Morph;
+  private readonly morph: Morph;
   private readonly input: () => FrameInput;
   private last = 0;
   private lastDraw = 0;
@@ -155,8 +154,7 @@ export class BlobRenderer {
   private blinkN = 1;
   private tickT = 1; // progress of the melt from the old clock digits to the new ones
   private t = 0; // own animation time, s
-  private sq = 0; // squash spring: + stretches tall, - squashes wide
-  private sqV = 0;
+  private squash = { x: 0, v: 0 }; // squash spring: + stretches tall, - squashes wide
   private twirl = newTwirl();
   private actor = new Actor();
   private actW = 0; // 0..1, an act is playing
@@ -193,7 +191,6 @@ export class BlobRenderer {
   private slowS = 0;
 
   constructor(canvas: HTMLCanvasElement, input: () => FrameInput, onLost: (lost: boolean) => void) {
-    this.canvas = canvas;
     this.input = input;
     const first = targetOf(input());
     this.cur = structuredClone(first.look);
@@ -310,7 +307,7 @@ export class BlobRenderer {
     this.flashT = 0;
     this.blinkT = 0;
     this.blinkN = 1;
-    Object.assign(this, { t: 0, sq: 0, sqV: 0, twirl: newTwirl(), lastView: view, actor: new Actor(), actW: 0, moodW: 0, held: rest(), lean: 0, leanV: 0, lastX: 0, lastVx: 0 });
+    Object.assign(this, { t: 0, squash: { x: 0, v: 0 }, twirl: newTwirl(), lastView: view, actor: new Actor(), actW: 0, moodW: 0, held: rest(), lean: 0, leanV: 0, lastX: 0, lastVx: 0 });
     this.alertW = isAlertShape(shape) ? 1 : 0;
     this.urgentW = alert?.urgency === 'urgent' && view === 'alert' ? 1 : 0;
     this.clockW = shape === SHAPE.clock ? 1 : 0;
@@ -489,7 +486,7 @@ export class BlobRenderer {
   }
 
   private kick(v: number): void {
-    this.sqV += v;
+    this.squash.v += v;
   }
 
   // Character on top of the look: squash and stretch, the morph hop and
@@ -526,14 +523,7 @@ export class BlobRenderer {
     const landed = Math.sin(phase0) > 0 && Math.sin(phase) <= 0;
     if (landed && this.alertW > 0.5) this.kick(-2.6 - 1.2 * this.urgentW);
 
-    // Spring, in small substeps so a long frame cannot blow it up.
-    const w = 2 * Math.PI * SQUASH_HZ;
-    const n = Math.max(1, Math.ceil(dt * 240));
-    for (let i = 0; i < n; i++) {
-      const h = dt / n;
-      this.sqV += (-w * w * this.sq - 2 * SQUASH_DAMP * w * this.sqV) * h;
-      this.sq += this.sqV * h;
-    }
+    spring(this.squash, 0, SQUASH_HZ, SQUASH_DAMP, dt);
 
     // Morph: hop and stretch in the air, and one full twirl.
     stepTwirl(this.twirl, m);
@@ -571,6 +561,7 @@ export class BlobRenderer {
     this.lastX = x;
     this.lastVx = vx;
     const lw = 2 * Math.PI * LEAN_HZ;
+    const n = Math.max(1, Math.ceil(dt * 240)); // substeps, as in spring()
     for (let i = 0; i < n; i++) {
       const h = dt / n;
       this.leanV += (-lw * lw * this.lean - 2 * 0.3 * lw * this.leanV - ax * 0.4) * h;
@@ -580,7 +571,7 @@ export class BlobRenderer {
 
     // World to body: undo the lean (x - lean * y), then the turn (yaw, pitch,
     // roll), then the squash and stretch at constant volume.
-    const st = 1 + Math.max(-0.3, Math.min(0.35, this.sq + 0.16 * air + this.alertW * 0.05 * bounce + p.sq));
+    const st = 1 + Math.max(-0.3, Math.min(0.35, this.squash.x + 0.16 * air + this.alertW * 0.05 * bounce + p.sq));
     this.euler.set(p.pitch, yaw, roll, 'YXZ');
     const body = (u.uBody.value as Matrix3).setFromMatrix4(this.rot.makeRotationFromEuler(this.euler)).transpose();
     body.multiply(this.shear.set(1, -this.lean, 0, 0, 1, 0, 0, 0, 1));

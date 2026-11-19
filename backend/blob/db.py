@@ -5,6 +5,7 @@ import json
 import sqlite3
 import threading
 from pathlib import Path
+from typing import TypedDict
 
 from .schemas import Timings
 
@@ -51,6 +52,14 @@ CREATE TABLE IF NOT EXISTS sessions (
     seen_at INTEGER NOT NULL
 )
 """
+
+
+class SessionRow(TypedDict):
+    sub: str
+    name: str
+    groups: list[str]
+    seen_at: int
+
 
 ALERT_COLUMNS = (
     "key",
@@ -168,16 +177,16 @@ class Db:
     ) -> None:
         await asyncio.to_thread(self._insert_session, id_hash, sub, name, groups, now)
 
-    def _get_session(self, id_hash: str) -> dict[str, object] | None:
+    def _get_session(self, id_hash: str) -> SessionRow | None:
         with self._lock:
             row = self._conn.execute(
                 "SELECT sub, name, groups, seen_at FROM sessions WHERE id_hash = ?", (id_hash,)
             ).fetchone()
         if row is None:
             return None
-        return {"sub": row[0], "name": row[1], "groups": json.loads(row[2]), "seen_at": row[3]}
+        return SessionRow(sub=row[0], name=row[1], groups=json.loads(row[2]), seen_at=row[3])
 
-    async def get_session(self, id_hash: str) -> dict[str, object] | None:
+    async def get_session(self, id_hash: str) -> SessionRow | None:
         return await asyncio.to_thread(self._get_session, id_hash)
 
     def _touch_session(self, id_hash: str, now: int) -> None:

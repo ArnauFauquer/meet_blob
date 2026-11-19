@@ -16,6 +16,7 @@ export class Capture implements Mic {
   private recorder: Recorder | null = null;
   private onCap: (() => void) | null = null;
   private moduleReady: Promise<void> | null = null;
+  private opening: Promise<void> | null = null; // getUserMedia in flight, shared by every caller
   private shared = false;
   private readonly buf = new Float32Array(1024);
   status: 'off' | 'open' | 'denied' = 'off';
@@ -30,10 +31,6 @@ export class Capture implements Mic {
     this.silenceRms = silenceRms;
   }
 
-  get open(): boolean {
-    return this.stream !== null;
-  }
-
   // The microphone track, for the mic log (muted, label, settings).
   get track(): MediaStreamTrack | null {
     return this.stream?.getAudioTracks()[0] ?? null;
@@ -42,12 +39,12 @@ export class Capture implements Mic {
   // Hands-free: open the one stream for good.
   async openShared(): Promise<void> {
     this.shared = true;
-    if (!this.stream) await this.openStream();
+    await this.ensureStream();
   }
 
   // onCap is called when the 15 s cap is reached.
   async start(onCap: () => void): Promise<void> {
-    if (!this.stream) await this.openStream();
+    await this.ensureStream();
     this.recorder = new Recorder(this.capMs, this.silenceRms);
     this.onCap = onCap;
   }
@@ -76,6 +73,16 @@ export class Capture implements Mic {
     if (!this.analyser) return 0;
     this.analyser.getFloatTimeDomainData(this.buf);
     return levelOf(this.buf);
+  }
+
+  // One stream at a time: a second caller while the first waits for the
+  // permission prompt gets the same stream, not a second one.
+  private ensureStream(): Promise<void> {
+    if (this.stream) return Promise.resolve();
+    this.opening ??= this.openStream().finally(() => {
+      this.opening = null;
+    });
+    return this.opening;
   }
 
   private async openStream(): Promise<void> {

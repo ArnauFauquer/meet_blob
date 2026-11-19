@@ -2,11 +2,13 @@
 // Silero (from @ricky0123/vad-web) runs in the audio model worker and posts one
 // speech probability per 32 ms frame; this module turns them into an end.
 
+import { RECORD_CAP_MS } from './config';
+
 export const POSITIVE = 0.5; // a frame at or above this is speech
 export const NEGATIVE = 0.35; // after speech started, frames at or above this keep it going
 export const MIN_SPEECH_MS = 90; // speech must last this long to count (clicks, taps)
 export const SILENCE_END_MS = 700; // 0.6 to 0.8 s of silence ends the utterance
-export const TOTAL_MS = 15_000;
+export const TOTAL_MS = RECORD_CAP_MS;
 
 export type VadEnd = 'speech_end' | 'no_speech' | 'cap';
 

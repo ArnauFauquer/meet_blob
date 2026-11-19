@@ -11,7 +11,7 @@ model_path = sys.argv[1]
 sess = ort.InferenceSession(model_path)
 print("input", [(i.name, i.shape) for i in sess.get_inputs()], "output", [(o.name, o.shape) for o in sess.get_outputs()])
 oww = Model(wakeword_models=[model_path], inference_framework="onnx")
-name = list(oww.models.keys())[0]
+name = next(iter(oww.models))
 
 
 def score(path):
@@ -22,7 +22,7 @@ def score(path):
     a = np.concatenate([np.zeros(16000, np.int16), a, np.zeros(16000, np.int16)])
     oww.reset()
     best = 0.0
-    for i in range(0, len(a) - 1280, 1280):
+    for i in range(0, len(a) - 1280 + 1, 1280):  # every full 80 ms chunk
         best = max(best, oww.predict(a[i:i + 1280])[name])
     return best
 

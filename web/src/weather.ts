@@ -85,7 +85,7 @@ export function weatherHtml(w: Weather, showNow: boolean, locale?: string): stri
       (d, i) =>
         `<div class="day${i === 0 ? ' today' : ''}"><span class="dn">${dayLabel(d.date, i, locale)}</span>${icon(d.kind)}` +
         `<span class="hi">${deg(d.max)}</span><span class="lo">${deg(d.min)}</span>` +
-        `<span class="rp">${d.rain != null && d.rain >= 30 ? `${d.rain}%` : ''}</span></div>`,
+        `<span class="rp">${d.rain != null && d.rain >= 30 ? `${Math.round(d.rain)}%` : ''}</span></div>`,
     )
     .join('');
   return `${now}<div class="week">${days}</div>`;

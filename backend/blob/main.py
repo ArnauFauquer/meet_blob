@@ -110,6 +110,7 @@ def create_app(
             settings.hermes_total_s,
             settings.session_idle_s,
             settings.hermes_alerts_url,
+            clock=wall,
             transport=hermes_transport,
         )
         st.sessions = Sessions(st.db, settings.session_idle_days, wall)
@@ -137,7 +138,10 @@ def create_app(
         )
         if settings.debug_audio_dir:
             st.hub.audio_dump = AudioDump(
-                settings.debug_audio_dir, settings.debug_audio_keep, settings.debug_wake_keep
+                settings.debug_audio_dir,
+                settings.debug_audio_keep,
+                settings.debug_wake_keep,
+                wall=wall,
             )
             log.warning(
                 "debug audio on: keeping the last %d utterances in %s",
@@ -166,7 +170,7 @@ def create_app(
             asyncio.create_task(run_scheduler(st.alerts)),
             asyncio.create_task(_load_models(app, stt, tts)),
             asyncio.create_task(_check_hermes(app)),
-            asyncio.create_task(_retention(app, settings.retention_days)),
+            asyncio.create_task(_retention(app, settings.retention_days, wall)),
         ]
         if st.weather:
             tasks.append(asyncio.create_task(st.weather.run()))
@@ -272,10 +276,10 @@ async def _check_hermes(app: FastAPI) -> None:
         await asyncio.sleep(HERMES_CHECK_S)
 
 
-async def _retention(app: FastAPI, days: int) -> None:
+async def _retention(app: FastAPI, days: int, wall: Callable[[], float]) -> None:
     while True:
         try:
-            n = await app.state.db.delete_turns_older_than(days, time.time())
+            n = await app.state.db.delete_turns_older_than(days, wall())
             log.info("deleted %d turns older than %d days", n, days)
             n = await app.state.sessions.delete_idle()
             log.info("deleted %d idle sessions", n)

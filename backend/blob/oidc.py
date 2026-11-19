@@ -14,12 +14,12 @@ import time
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
 import httpx
 import jwt
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
 from .auth import (
@@ -221,12 +221,12 @@ def _text(status: int, text: str) -> PlainTextResponse:
 
 
 @router.get("/login")
-async def login(request: Request, next: str = "/") -> Response:
+async def login(request: Request, next_path: Annotated[str, Query(alias="next")] = "/") -> Response:
     if request.app.state.settings.auth_disabled:  # nothing to sign in to
-        return RedirectResponse(safe_next(next), status_code=302)
+        return RedirectResponse(safe_next(next_path), status_code=302)
     oidc: OidcClient = request.app.state.oidc
     try:
-        url, state = await oidc.start(next)
+        url, state = await oidc.start(next_path)
     except OidcError as e:
         log.warning("sign-in unavailable: %s", e)
         return _text(502, "Sign-in provider unreachable. Try again in a moment.")
