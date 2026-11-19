@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 
 from . import __version__, turnlog
 from .alerts import Alerts
+from .audio import PCM_RATE
 from .debugaudio import AudioDump
 from .devices import Device
 from .schemas import (
@@ -35,7 +36,7 @@ from .turn import TurnManager
 log = logging.getLogger(__name__)
 
 MAX_FRAME = 1 << 20  # 15 s of 16 kHz 16-bit audio is about 480 KB
-MAX_WAKE_CLIP = 10 * 16000 * 2  # 10 s
+MAX_WAKE_CLIP = 10 * PCM_RATE * 2  # 10 s of 16-bit audio
 CLOSE_BEFORE_HELLO = 4400
 CLOSE_SIGNED_OUT = 4401  # no valid session cookie: the page sends the browser to sign in
 

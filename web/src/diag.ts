@@ -21,6 +21,7 @@ export class Diag {
   }
 
   show(): void {
+    if (this.open) return; // a long press while it is open
     this.el.hidden = false;
     this.health = 'checking';
     fetch('/healthz')

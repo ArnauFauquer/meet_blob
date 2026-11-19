@@ -19,15 +19,13 @@ RATE = 24000
 PUBLIC = Path(__file__).resolve().parent.parent / "web" / "public"
 
 
-def sine(freq: float, seconds: float, volume: float = 0.4, fade_s: float = 0.01, decay_s: float = 0.0) -> bytes:
+def sine(freq: float, seconds: float, volume: float = 0.4, fade_s: float = 0.01) -> bytes:
     n = int(RATE * seconds)
     fade = int(RATE * fade_s)
     frames = bytearray()
     for i in range(n):
-        # short fades at both ends so the sound does not click; decay_s > 0 adds a bell-like decay
+        # short fades at both ends so the sound does not click
         env = min(1.0, i / fade, (n - 1 - i) / fade)
-        if decay_s:
-            env *= math.exp(-i / (RATE * decay_s))
         frames += struct.pack("<h", int(32767 * volume * env * math.sin(2 * math.pi * freq * i / RATE)))
     return bytes(frames)
 

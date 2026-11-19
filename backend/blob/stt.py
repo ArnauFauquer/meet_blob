@@ -6,6 +6,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
+from .audio import PCM_RATE
+
 
 @dataclass(frozen=True)
 class SttResult:
@@ -33,7 +35,7 @@ class WhisperStt:
 
     def warmup(self) -> None:
         # vad_filter off so the model call is not skipped on silence
-        self._run(np.zeros(16000, dtype=np.float32), vad_filter=False)
+        self._run(np.zeros(PCM_RATE, dtype=np.float32), vad_filter=False)
 
     def __call__(self, audio: NDArray[np.float32]) -> SttResult:
         return self._run(audio, vad_filter=True)

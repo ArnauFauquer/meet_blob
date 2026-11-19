@@ -2,6 +2,7 @@ import { AlertReader } from './alert-reader';
 import { goSignIn } from './auth';
 import { Capture } from './audio/capture';
 import { ALARM_SOUNDS, Alarm, ChimeRules, pickRing } from './audio/chime';
+import { msToSamples, samplesToMs } from './audio/pcm';
 import { Playback } from './audio/playback';
 import {
   DEFAULT_DEVICE_CONFIG,
@@ -21,7 +22,7 @@ import { decideTap } from './taps';
 import { TurnClient, type TurnDeps } from './turn-client';
 import { VadController } from './vad';
 import type { Detector, WakeConfig } from './wake/detector';
-import { PcmRing, PhraseSegmenter, ScoreHistory, msToSamples, samplesToMs } from './wake/clips';
+import { PcmRing, PhraseSegmenter, ScoreHistory } from './wake/clips';
 import { FollowUp, gateReason, wakeAllowed } from './wake/wake-gate';
 import { MicStats, PeakTracker, type WakePeak } from './wake/wake-log';
 import { checkVersion, entryBundle } from './version';
@@ -75,7 +76,8 @@ const enrolled = { sent: 0, last: 0 };
 
 function sendClip(label: 'pos' | 'neg' | 'auto', peak: number, pcm: Int16Array): void {
   if (!deviceConfig.debug_audio || !pcm.length) return;
-  if (sock.send({ type: 'wake_clip', label, peak, dur_ms: samplesToMs(pcm.length) }, pcm.buffer as ArrayBuffer) && label !== 'auto') {
+  const sent = sock.send({ type: 'wake_clip', label, peak, dur_ms: samplesToMs(pcm.length) }, pcm.buffer as ArrayBuffer);
+  if (sent && label !== 'auto') {
     enrolled.sent += 1;
     enrolled.last = peak;
   }
@@ -137,6 +139,8 @@ const reader = new AlertReader({
   },
 });
 const chime = new ChimeRules(() => deviceConfig);
+// A turn is under way: the backend's, this page's reply playing, or this page's own request.
+const turnBusy = () => turnActive({ conv, playing: turnPlaying() }) || turn.phase !== 'idle';
 let lastRing = -1;
 const alarm = new Alarm({
   ring: (gain) => {
@@ -144,7 +148,7 @@ const alarm = new Alarm({
     lastRing = r.index;
     void playback.effect(ALARM_SOUNDS[r.index], gain, r.rate);
   },
-  hush: () => reader.reading || turnActive({ conv, playing: turnPlaying() }) || turn.phase !== 'idle',
+  hush: () => reader.reading || turnBusy(),
 });
 
 // Playback of a turn reply (an alert being read aloud is not a turn).
@@ -210,7 +214,7 @@ setInterval(() => void pollWeather(), WEATHER_POLL_MS);
 function checkChime(): void {
   alarm.update(alerts.map((a) => a.key));
   if (!configLoaded) return; // the sound flag is not known yet
-  const active = turnActive({ conv, playing: turnPlaying() }) || turn.phase !== 'idle';
+  const active = turnBusy();
   if (active) alarm.stop();
   if (chime.update(alerts, active)) alarm.start(chime.fired);
 }
@@ -316,9 +320,13 @@ async function startHandsFree(): Promise<void> {
     }
     setInterval(logMic, MIC_LOG_MS);
   } catch {
-    faults.set('mic_denied', true);
-    sock.send({ type: 'client_event', kind: 'fault', fault: 'mic_denied' });
+    micDenied();
   }
+}
+
+function micDenied(): void {
+  faults.set('mic_denied', true);
+  sock.send({ type: 'client_event', kind: 'fault', fault: 'mic_denied' });
 }
 
 // A reconnect usually means a deploy. PAGE_VERSION is the protocol version, so
@@ -378,10 +386,7 @@ const turnDeps: TurnDeps = {
     // How the turn started (tap, wake, followup), next to the backend's timing line for turn t.
     sock.send({ type: 'client_event', kind: 'turn_start', turn: t, how: turn.kind });
   },
-  onMicDenied() {
-    faults.set('mic_denied', true);
-    sock.send({ type: 'client_event', kind: 'fault', fault: 'mic_denied' });
-  },
+  onMicDenied: micDenied,
   onBusy: () => renderer?.flash(),
   noSpeechMs: () => ({ listen: deviceConfig.listen_no_speech_s * 1000, followup: deviceConfig.followup_listen_s * 1000 }),
   onListenEnd(kind) {
@@ -515,11 +520,24 @@ const diag = new Diag($('diag'), () => ({
   phase: turn.phase,
   fault: faults.current ?? 'none',
   frame_ms: renderer ? Math.round(renderer.frameMs * 10) / 10 : 'no WebGL',
-  last_turn: lastTurn ? { turn: lastTurn.turn, reason: lastTurn.reason, timeout_kind: lastTurn.timeout_kind, ...lastTurn.timings } : 'none',
+  last_turn: lastTurn
+    ? { turn: lastTurn.turn, reason: lastTurn.reason, timeout_kind: lastTurn.timeout_kind, ...lastTurn.timings }
+    : 'none',
   device_config: deviceConfig,
   alerts: alerts.map((a) => `${a.key}:${a.source}:${a.urgency}`).join(' ') || 'none',
   wake: handsFree
-    ? { phrase: wakeCfg?.phrase, model: wakeCfg?.model, verifier: wakeCfg?.verifier ? wakeVerifier : 'none', threshold: wakeCfg?.threshold, enroll: enroll ?? 'off', ready: wakeReady, running: wakeOn, score: +wakeStats.score.toFixed(3), max: +wakeStats.max.toFixed(3), detections: wakeStats.detections }
+    ? {
+        phrase: wakeCfg?.phrase,
+        model: wakeCfg?.model,
+        verifier: wakeCfg?.verifier ? wakeVerifier : 'none',
+        threshold: wakeCfg?.threshold,
+        enroll: enroll ?? 'off',
+        ready: wakeReady,
+        running: wakeOn,
+        score: +wakeStats.score.toFixed(3),
+        max: +wakeStats.max.toFixed(3),
+        detections: wakeStats.detections,
+      }
     : 'off (tap only)',
   vad: turnDeps.vad ? { listening: vad.active, p: +vad.lastP.toFixed(2) } : 'off',
 }));
@@ -617,13 +635,11 @@ window.blobDebug = {
     return reader.reading;
   },
   get handsFree() {
-    return { on: handsFree, wakeReady, vad: !!turnDeps.vad, wakeOn, followup: followup.active, ...wakeStats };
+    return { on: handsFree, wakeReady, vad: !!turnDeps.vad, wakeOn, followup: followup.active, threshold: wakeCfg?.threshold, ...wakeStats };
   },
   get turnKind() {
     return turn.kind;
   },
-  // Screenshot scripts only. No view: hold the current frame (a mid-morph
-  // capture). With a view: stop and restart that view's motion at zero (film strip).
   // Starts a little act now (names in ACTS, render/acts.ts).
   act(name: string) {
     renderer?.play(name);
@@ -631,6 +647,8 @@ window.blobDebug = {
   get weather() {
     return weather;
   },
+  // Screenshot scripts only. No view: hold the current frame (a mid-morph
+  // capture). With a view: stop and restart that view's motion at zero (film strip).
   freeze(v?: View, clock?: string, alert?: FrameInput['alert'], sky?: Sky) {
     if (v) renderer?.freeze(v, clock ? new Date(clock) : null, alert, sky);
     else renderer?.stop();

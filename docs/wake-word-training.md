@@ -25,8 +25,9 @@ the page loads it, how well it does, how it was trained, and how to retrain it.
     if there are false accepts, lower it if there are misses. It was 0.5 until the tablet test of
     2026-11-13: real attempts peaked between 0.14 and 0.77 and fired 3 times in 6.
 *   A browser whose user is not in the wake group (`OIDC_WAKE_GROUP`) loads none of this.
-*   The stock `hey_jarvis_v0.1.onnx` stays in the folder: the pipeline unit test uses it, and
-    pointing `wake.json` back at it (`"phrase": "hey jarvis"`) is the fallback.
+*   The stock `hey_jarvis_v0.1.onnx` is a test fixture (`web/e2e/fixtures/`) for the pipeline unit
+    test. To fall back to it, copy it into `web/public/models/` and point `wake.json` at it
+    (`"phrase": "hey jarvis"`).
 
 To install another model: copy it to `web/public/models/`, point `wake.json` at it, add its
 licence line and SHA-256 to `web/public/models/README.md`, rebuild the page (`npm run build`, or

@@ -30,10 +30,6 @@ export class FaultLine {
     this.onChange(this.text);
   }
 
-  has(f: Fault): boolean {
-    return this.active.has(f);
-  }
-
   get current(): Fault | null {
     return ORDER.find((f) => this.active.has(f)) ?? null;
   }

@@ -119,11 +119,14 @@ client_message: TypeAdapter[ClientMessage] = TypeAdapter(ClientMessage)
 
 # Server to client
 
+Urgency = Literal["info", "urgent"]
+AlertState = Literal["pending", "active", "acked"]
+
 
 class AlertItem(BaseModel):
     key: str
     source: str
-    urgency: Literal["info", "urgent"]
+    urgency: Urgency
     text: str
     lang: str
     late: bool
@@ -225,7 +228,7 @@ class AlertIn(BaseModel):
     key: AlertKey
     source: str = Field(min_length=1, max_length=64)
     text: str = Field(min_length=1, max_length=300)
-    urgency: Literal["info", "urgent"] | None = None  # None: urgent for source=timer, else info
+    urgency: Urgency | None = None  # None: urgent for source=timer, else info
     lang: str = Field(default="es", min_length=1, max_length=16)
     # Epoch seconds or RFC3339 with an offset. Strict numbers: a bool is not an epoch.
     fire_at: StrictInt | StrictFloat | str | None = None
@@ -258,5 +261,5 @@ class AlertIn(BaseModel):
 
 class AlertOut(BaseModel):
     key: str
-    state: Literal["pending", "active", "acked"]
+    state: AlertState
     fire_at: int | None

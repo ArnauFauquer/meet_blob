@@ -49,7 +49,7 @@ def audioset():
             urllib.request.urlretrieve(url, tmp)
             table = pq.read_table(tmp)
             print(part, table.schema, flush=True)
-            col = [c for c in table.column_names if c == "audio" or c == "flac"][0]
+            col = next(c for c in table.column_names if c in ("audio", "flac"))
             for i, rec in enumerate(tqdm(table.column(col).to_pylist(), desc=part)):
                 name = f"{part.split('.')[0]}_{i:05d}.wav"
                 try:

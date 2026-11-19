@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from blob.audio import read_wav, resample, wav_bytes
+from blob.audio import PCM_RATE, read_wav, resample, wav_bytes
 from blob.tts import KokoroTts
 
 CLIPS = Path(__file__).resolve().parents[1] / "tests" / "clips"
@@ -32,15 +32,16 @@ def main() -> None:
     CLIPS.mkdir(parents=True, exist_ok=True)
     tts = KokoroTts(a.model_dir, "cpu")
     tts.load()
-    pad = np.zeros(8000, dtype=np.float32)  # 0.5 s before and after, like a real tap turn
+    pad = np.zeros(PCM_RATE // 2, dtype=np.float32)  # 0.5 s before and after, like a real tap turn
     for name, (text, lang) in TEXTS.items():
         tmp = CLIPS / f"{name}.24k.wav"
         tmp.write_bytes(tts(text, lang))
         samples, rate = read_wav(str(tmp))
         tmp.unlink()
-        clip = np.concatenate([pad, resample(samples, rate, 16000), pad])
-        (CLIPS / f"{name}.wav").write_bytes(wav_bytes(clip, 16000))
-    (CLIPS / "silence.wav").write_bytes(wav_bytes(np.zeros(32000, dtype=np.float32), 16000))
+        clip = np.concatenate([pad, resample(samples, rate, PCM_RATE), pad])
+        (CLIPS / f"{name}.wav").write_bytes(wav_bytes(clip, PCM_RATE))
+    silence = np.zeros(2 * PCM_RATE, dtype=np.float32)
+    (CLIPS / "silence.wav").write_bytes(wav_bytes(silence, PCM_RATE))
     for f in sorted(CLIPS.glob("*.wav")):
         with wave.open(str(f)) as w:
             print(f"{f.name}: {w.getnframes() / w.getframerate():.2f} s at {w.getframerate()} Hz")

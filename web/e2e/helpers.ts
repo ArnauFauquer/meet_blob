@@ -1,9 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 export const external = !!process.env.BLOB_URL;
-// Against a real backend: the blob_session cookie of a signed-in browser (the device name is then
-// the session's user, and its flags come from that user's groups). The mock takes the device
-// name as the session.
 
 // Tests whose flow needs the mock's scenarios (picked by device name).
 export function mockOnly(): void {
@@ -57,6 +54,9 @@ function instrument() {
   };
 }
 
+// Against a real backend: the blob_session cookie of a signed-in browser (the device name is then
+// the session's user, and its flags come from that user's groups). The mock takes the device
+// name as the session.
 export const SESSION = process.env.BLOB_SESSION;
 
 export async function openBlob(page: Page, device: string, session: string | null = SESSION ?? device, query = ''): Promise<void> {
@@ -133,7 +133,7 @@ export function alertSource(request: APIRequestContext) {
   const headers = { Authorization: `Bearer ${ALERT_TOKEN}` };
   return {
     // `name` becomes a unique key, unless `key` is given (an update of that alert).
-    async post(name: string, body: { source: string; urgency?: 'info' | 'urgent'; text?: string }, key = `e2e-${name}-${Date.now()}`): Promise<string> {
+    async post(name: string, body: { source: string; urgency?: 'info' | 'urgent'; text?: string; in_s?: number }, key = `e2e-${name}-${Date.now()}`): Promise<string> {
       const r = await request.post('/alerts', { headers, data: { key, text: `Alert ${name}.`, lang: 'en', ...body } });
       expect(r.status(), `POST /alerts ${key}`).toBeLessThan(300);
       keys.push(key);

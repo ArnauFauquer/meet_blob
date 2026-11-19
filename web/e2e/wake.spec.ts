@@ -22,7 +22,9 @@ test('wake word: "hey blob" sends wake, the turn listens, the VAD ends it, nothi
   expect(before.every((e) => e.data?.binary === undefined)).toBe(true);
   // one shared stream, opened at load, not per turn
   expect(l.filter((e) => e.dir === 'gum')).toHaveLength(1);
-  expect((await dbg<{ max: number }>(page, 'handsFree')).max).toBeGreaterThan(0.5);
+  // the score reached wake.json's threshold (a real "hey blob" peaks anywhere above it)
+  const hf = await dbg<{ max: number; threshold: number }>(page, 'handsFree');
+  expect(hf.max).toBeGreaterThanOrEqual(hf.threshold);
 
   await waitFor(page, (l) => recv(l, 'state').some((e) => e.t > wake.t && e.data?.conv === 'listening'), 'listening');
   expect(await dbg(page, 'turnKind')).toBe('wake');

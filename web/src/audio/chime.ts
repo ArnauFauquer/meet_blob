@@ -92,9 +92,10 @@ export interface AlarmDeps {
 }
 
 // The alarm a ChimeRules "play" starts: the chime every ALARM_EVERY_MS for
-// ALARM_MS, swelling from soft to full volume. It stops early on a tap, when a turn starts or the alert is read,
-// and when every alert it rings for has left the snapshot (acked, deleted).
-// A new alert while it rings joins it and gives it another ALARM_MS.
+// ALARM_MS, swelling from soft to full volume. It stops early on a tap, when a
+// turn starts or the alert is read, and when every alert it rings for has left
+// the snapshot (acked, deleted). A new alert while it rings joins it and gives
+// it another ALARM_MS.
 export class Alarm {
   private readonly keys = new Set<string>();
   private until = 0;

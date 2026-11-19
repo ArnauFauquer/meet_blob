@@ -1,21 +1,21 @@
 """Alerts and timers (S4): the store, the POST/DELETE/GET /alerts router and the scheduler.
 
 The rows live in SQLite and in a dict mirror, so a snapshot is built without a database call.
-Every mutation takes one asyncio lock, writes through to SQLite, then broadcasts a snapshot.
+Every mutation takes one asyncio lock, writes to SQLite before it changes the mirror (so a failed
+write leaves both as they were), then broadcasts a snapshot.
 """
 
 import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, dataclass
-from typing import Literal
+from dataclasses import asdict, dataclass, replace
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from .auth import require_alert_token
 from .db import Db
-from .schemas import AlertIn, AlertItem, AlertOut, TimerItem
+from .schemas import AlertIn, AlertItem, AlertOut, AlertState, TimerItem, Urgency
 from .timer_rule import TimerRequest
 
 log = logging.getLogger(__name__)
@@ -23,8 +23,6 @@ log = logging.getLogger(__name__)
 MAX_ACTIVE = 20
 SLEEP_CAP_S = 0.25  # a timer added while the scheduler sleeps is seen this fast
 ACKED_KEEP_S = 24 * 3600
-
-State = Literal["pending", "active", "acked"]
 
 
 class TooManyAlerts(Exception):
@@ -35,10 +33,10 @@ class TooManyAlerts(Exception):
 class Alert:
     key: str
     source: str
-    urgency: Literal["info", "urgent"]
+    urgency: Urgency
     text: str
     lang: str
-    state: State
+    state: AlertState
     fire_at: int | None
     ttl_s: int | None
     late: bool
@@ -157,16 +155,17 @@ class Alerts:
                 created_at=old.created_at if old else int(now),
                 activated_at=activated_at,
             )
-            await self._write([a], [])  # first, so a failed write leaves the mirror unchanged
+            await self._write([a], [])
             self.rows[a.key] = a
         await self._on_change()
         return a, old is None
 
     async def delete(self, key: str) -> None:
         async with self._lock:
-            if self.rows.pop(key, None) is None:
+            if key not in self.rows:
                 return
             await self._write([], [key])
+            del self.rows[key]
         await self._on_change()
 
     async def ack(self, key: str) -> None:
@@ -175,8 +174,9 @@ class Alerts:
             a = self.active(key)
             if a is None:
                 return
-            a.state, a.acked_at = "acked", int(self._wall())
-            await self._write([a], [])
+            acked = replace(a, state="acked", acked_at=int(self._wall()))
+            await self._write([acked], [])
+            self.rows[key] = acked
         await self._on_change()
 
     async def create_timer(self, req: TimerRequest) -> None:
@@ -193,18 +193,18 @@ class Alerts:
             save, delete = [], []
             for a in self.rows.values():
                 if a.state == "pending" and a.fire_at is not None and a.fire_at <= now:
-                    a.state, a.activated_at = "active", int(now)
-                    save.append(a)
+                    save.append(replace(a, state="active", activated_at=int(now)))
                 elif (
                     a.state == "active"
                     and a.ttl_s is not None
                     and (a.activated_at or 0) + a.ttl_s <= now
                 ) or (a.state == "acked" and (a.acked_at or 0) + ACKED_KEEP_S <= now):
                     delete.append(a.key)
-            for key in delete:
-                del self.rows[key]
             if save or delete:
-                await self._write(save, delete)
+                await self._write(save, delete)  # first, so a failed write is retried next tick
+                self.rows.update((a.key, a) for a in save)
+                for key in delete:
+                    del self.rows[key]
                 changed = True
             pending = [a.fire_at for a in self.rows.values() if a.state == "pending" and a.fire_at]
         if changed:

@@ -70,15 +70,13 @@ class Sessions:
         if row is None:
             return None
         now = int(self._wall())
-        seen = int(row["seen_at"])  # type: ignore[call-overload]
+        seen = row["seen_at"]
         if now - seen > self._idle_s:
             await self._db.delete_session(key)
             return None
         if now - seen > TOUCH_EVERY_S:
             await self._db.touch_session(key, now)
-        groups = row["groups"]
-        assert isinstance(groups, list)
-        return User(sub=str(row["sub"]), name=str(row["name"]), groups=tuple(map(str, groups)))
+        return User(sub=row["sub"], name=row["name"], groups=tuple(map(str, row["groups"])))
 
     async def delete(self, session_id: str) -> None:
         if session_id:

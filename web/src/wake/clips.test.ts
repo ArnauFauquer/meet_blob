@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { PcmRing, PhraseSegmenter, ScoreHistory, msToSamples, samplesToMs } from './clips';
+import { msToSamples, samplesToMs } from '../audio/pcm';
+import { PcmRing, PhraseSegmenter, ScoreHistory } from './clips';
 
 const block = (amp: number, n = 320) => {
   const b = new Int16Array(n);

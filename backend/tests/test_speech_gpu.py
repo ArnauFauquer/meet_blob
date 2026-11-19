@@ -11,7 +11,7 @@ import wave
 
 import pytest
 
-from blob.audio import read_wav, resample
+from blob.audio import PCM_RATE, read_wav, resample
 from blob.stt import WhisperStt, is_empty
 from blob.tts import KokoroTts
 from tests.conftest import CLIPS
@@ -49,7 +49,7 @@ def clip(name: str) -> str:
 def test_transcribe(stt: WhisperStt, lang: str) -> None:
     samples, rate = read_wav(clip(lang))
     t0 = time.perf_counter()
-    r = stt(resample(samples, rate, 16000))
+    r = stt(resample(samples, rate, PCM_RATE))
     took = time.perf_counter() - t0
     print(f"\n{lang}: {r.text!r} lang={r.lang} p={r.no_speech_prob:.2f} {took:.2f}s")
     assert r.lang == lang

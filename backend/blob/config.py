@@ -14,8 +14,6 @@ class Settings(BaseSettings):
     hermes_url: str
     hermes_key: str
     hermes_model: str
-    # Only "session" is built: the S0 Hermes test showed X-Hermes-Session-Id keeps a session.
-    hermes_history_mode: Literal["session"] = "session"
     hermes_connect_s: float = Field(5, gt=0)
     hermes_total_s: float = Field(75, gt=0)
     session_idle_s: float = Field(300, gt=0)
@@ -49,6 +47,9 @@ class Settings(BaseSettings):
     oidc_issuer: str = ""
     oidc_client_id: str = ""
     oidc_client_secret: str = ""  # empty: public client (PKCE only)
+    # Local development only: no sign-in, every browser and script is the user "dev", in the sound
+    # and wake groups. Never on a reachable deployment: anyone on the network gets in.
+    auth_disabled: bool = False
     # Group names in the ID token's "groups" claim that turn a signed-in browser's flags on.
     oidc_sound_group: str = "blob-sound"
     oidc_wake_group: str = "blob-wake"
@@ -86,14 +87,10 @@ class Settings(BaseSettings):
 
     @field_validator("hermes_url", "hermes_alerts_url")
     @classmethod
-    def _strip_slash(cls, v: str) -> str:
+    def _hermes_url(cls, v: str) -> str:
         if not v.startswith(("http://", "https://")):
             raise ValueError("HERMES_URL and HERMES_ALERTS_URL must start with http:// or https://")
         return v.rstrip("/")
-
-    # Local development only: no sign-in, every browser and script is the user "dev", in the sound
-    # and wake groups. Never on a reachable deployment: anyone on the network gets in.
-    auth_disabled: bool = False
 
     @field_validator("public_url", "oidc_issuer")
     @classmethod

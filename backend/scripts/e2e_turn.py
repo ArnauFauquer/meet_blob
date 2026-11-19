@@ -9,8 +9,7 @@ Options: --empty sends a zero-length utterance; --cancel-after S cancels S secon
 utterance; --busy-check taps from a second connection while the turn is open and expects
 error busy; --expect-error CODE expects the tap itself to get that error (for not_ready).
 S3: --wake sends wake instead of tap (--followup sets wake.followup; the session's user must be
-in the wake group);
---expect-followup true|false checks the tts followup flag.
+in the wake group); --expect-followup true|false checks the tts followup flag.
 Exit status 0 when every expectation holds.
 """
 
@@ -26,7 +25,7 @@ from typing import Any
 from websockets.sync.client import ClientConnection, connect
 
 from blob import __version__
-from blob.audio import read_wav, to_pcm16k
+from blob.audio import PCM_RATE, read_wav, to_pcm16k
 
 TIMING_KEYS = {"stt_ms", "hermes_ms", "tts_ms", "first_audio_ms", "sc1_ms"}
 
@@ -79,6 +78,8 @@ def turn(stack: ExitStack) -> int:
     p.add_argument("--followup", action="store_true", help="wake.followup = true")
     p.add_argument("--expect-followup", choices=["true", "false"])
     a = p.parse_args()
+    if not a.empty and not a.wav:
+        p.error("give --wav, or --empty for a zero-length utterance")
     failures: list[str] = []
     t0 = time.monotonic()
 
@@ -114,8 +115,8 @@ def turn(stack: ExitStack) -> int:
         "type": "utterance",
         "turn": turn,
         "format": "pcm_s16le",
-        "rate": 16000,
-        "dur_ms": len(pcm) // 32,
+        "rate": PCM_RATE,
+        "dur_ms": len(pcm) * 1000 // (2 * PCM_RATE),
         "tail_silence_ms": a.tail_silence_ms,
     }
     t0 = time.monotonic()  # message times below are from the utterance
