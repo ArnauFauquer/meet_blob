@@ -538,7 +538,7 @@ Source: the "Alternatives Weighed" section and the Prior Art section of `docs/de
 
 ## Additional Resources
 
-*   [Concepts brief and RFC](./blob.md) (section "Current Design"): where this design comes from, with the review history. [`review_round2.md`](../../review_round2.md) has the second review.
+*   [Concepts brief and RFC](./blob.md) (section "Current Design"): where this design comes from, with the review history. [`review_round2.md`](./review_round2.md) has the second review.
 *   [Hermes Agent API server](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server)
 *   [Hermes voice mode](https://github.com/nousresearch/hermes-agent/blob/main/website/docs/user-guide/features/voice-mode.md) (not used, studied)
 *   [Hermes wake word](https://hermes-agent.nousresearch.com/docs/user-guide/features/wake-word) (not used, studied)

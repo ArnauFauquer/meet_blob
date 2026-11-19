@@ -94,7 +94,7 @@ branches merge without a conflict; move it next to them after the merge if you l
 
 ### Part A: page checks (run on 2026-11-13, headless Chromium, mock backend)
 
-No tablet, no GPU, no real backend. Commit: see `docs/coordination/reports/web-s3-s4.md`.
+No tablet, no GPU, no real backend.
 From `web/` (`MOCK_PORT` only if 8787 is taken):
 
 1.  `npm run lint`, `npm run typecheck`, `npm run build`: no errors. `npm test`: 17 files, 136 tests passed.

@@ -8,7 +8,9 @@ import { OwwPipeline } from './oww';
 import { bindModels } from './models';
 
 const file = (p: string) => readFileSync(new URL(p, import.meta.url));
-const models = (name: string) => `../../public/models/${name}`;
+const fixtures = '../../e2e/fixtures/';
+// The page's models, and the stock hey jarvis model kept only as a test fixture.
+const models = (name: string) => (name === 'hey_jarvis_v0.1.onnx' ? fixtures : '../../public/models/') + name;
 
 function pcm16(wav: Buffer): Int16Array {
   const data = wav.indexOf('data') + 8;

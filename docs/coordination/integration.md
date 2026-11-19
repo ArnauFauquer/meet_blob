@@ -1,8 +1,8 @@
 # Integration record (coordinator)
 
 Date: 2026-11-13. Everything below was run by the coordinator on the merged `main`, apart from the
-unit and mock-backend suites that the implementation sessions ran (their reports are in
-`docs/coordination/reports/`).
+unit and mock-backend suites that the implementation sessions ran (their session reports are in
+the git history).
 
 ## What exists
 

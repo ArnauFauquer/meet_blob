@@ -110,5 +110,5 @@ Contact sheets in `docs/screenshots/motion/`: `clock`, `alert-timer-info`, `aler
 ## After the merge with main (S3/S4)
 
 - **Alerts.** Alerts use the same shading, with a lava colour from `ALERT_LAVA`. Their flat faces get stronger flowing ripples in the reflection (`faceted`), so they do not mirror one flat colour.
-- **Cost.** The merged shader costs 1.92x the original at idle in SwiftShader: 1.44x from this shading on top of main's new `map()`, which already costs about 1.33x. Details and a suggested fix are in `docs/coordination/reports/look.md`.
+- **Cost.** The merged shader costs 1.92x the original at idle in SwiftShader: 1.44x from this shading on top of main's new `map()`, which already costs about 1.33x. If the tablet turns out slow, a cheap fix in `map()` is a compile-time `ALERTS` define: `blob.ts` would set it only while an alert shape is shown or morphing, at the cost of one shader rebuild (about 0.1 to 0.2 s) when an alert appears. The quality tiers lower the cost meanwhile: quality 0 is 1.72x the original.
 - **Load.** Compile, link and first draw take 277 ms: no load-time stall.
