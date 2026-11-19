@@ -54,7 +54,7 @@ uniform vec4 uDigitY;     // vertical bob of each digit (a slow wave across the 
 uniform float uColon;     // 0..1, the colon's beat once a second
 // Weather (shape 4, the idle blob showing the sky outside): weights of each
 // part, eased on the CPU so one sky melts into the next.
-uniform vec4 uSky;    // sun, moon, cloud, (unused)
+uniform vec4 uSky;    // sun, moon, cloud, size (scale to the sphere's volume)
 uniform vec3 uFall;   // drops falling from the cloud: amount, snow (0 rain, 1 flakes), fall time
 uniform vec3 uFaceT;  // where the face sits on the weather shape: offset xy, scale
 // Body motion (animateBody() in blob.ts): the body's offset (hops, acts) and
@@ -171,6 +171,15 @@ vec3 alertFrame(vec3 p) {
   return p;
 }
 
+// One body, one volume: every shape is scaled so that it holds the sphere's
+// volume (4/3 pi uRadius^3), so a morph only moves the liquid around instead
+// of growing or shrinking it. Measured by counting voxels inside each
+// distance function (static, without lobes or ripples); the weather's comes
+// per sky from skyParts() in tables.ts (uSky.w).
+const float VOL_TRIANGLE = 1.562;
+const float VOL_SQUARE = 1.407;
+const float VOL_CLOCK = 0.919;
+
 // Both alert shapes at once: (triangle, square). They share the transform and the shimmer.
 vec2 alertShapes(vec3 p) {
   float s = radius() / uRadius;
@@ -178,18 +187,18 @@ vec2 alertShapes(vec3 p) {
   // Soft, well rounded bodies (a smaller core, a thick rounding) that still
   // read as a triangle and a square; the lava lobes push bumps out of their
   // faces and edges, and the sphere's slow ripples keep them liquid.
-  vec2 d = vec2(sdTriPrism(p + vec3(0.0, 0.15, 0.0), 0.46, 0.14) - 0.17,
-                sdRoundBox(p, vec3(0.58, 0.58, 0.34), 0.3));
-  d.x = lobePush(d.x, p + vec3(0.0, 0.15, 0.0), vec3(0.5, 0.42, 0.45), 0.42);
-  d.y = lobePush(d.y, p, vec3(0.85, 0.8, 0.5), 0.5);
-  d += ripple(p) * 1.6;
-  return d * s;
+  vec3 t = p / VOL_TRIANGLE + vec3(0.0, 0.15, 0.0);
+  vec3 q = p / VOL_SQUARE;
+  vec2 d = vec2(sdTriPrism(t, 0.46, 0.14) - 0.17, sdRoundBox(q, vec3(0.58, 0.58, 0.34), 0.3));
+  d.x = lobePush(d.x, t, vec3(0.5, 0.42, 0.45), 0.42) + ripple(t) * 1.6;
+  d.y = lobePush(d.y, q, vec3(0.85, 0.8, 0.5), 0.5) + ripple(q) * 1.6;
+  return d * vec2(VOL_TRIANGLE, VOL_SQUARE) * s;
 }
 
 // Clock size: larger than the blob, to be read from across the room. It
 // breathes with the radius and shrinks to fit a narrow screen.
 float clockScale() {
-  return radius() / uRadius * 1.3 * min(1.0, uRes.x / uRes.y / 1.3);
+  return radius() / uRadius * 1.3 * VOL_CLOCK * min(1.0, uRes.x / uRes.y / 1.3);
 }
 
 // The clock body: a wide pill facing the camera, still liquid on its surface.
@@ -207,7 +216,7 @@ float smax(float a, float b, float k) {
 
 // Weather size: like the clock, larger than the blob and fitted to a narrow screen.
 float weatherScale() {
-  return radius() / uRadius * 0.85 * min(1.0, uRes.x / uRes.y / 0.9);
+  return radius() / uRadius * 0.85 * uSky.w * min(1.0, uRes.x / uRes.y / 0.9);
 }
 
 // The sky outside, in units of the blob radius: a sun with rays that turn and
@@ -234,8 +243,8 @@ float weatherShape(vec3 p) {
     float a = ang - id * SECTOR;
     vec2 rp = length(o.xy) * vec2(cos(a), sin(a));
     float rr = sr * mix(0.3, 1.0, uSky.x); // the rays retract into the orb as the sun goes
-    float len = rr * (0.32 + 0.1 * sin(uFlow * 5.0 + id * 1.9)) * uSky.x;
-    vec3 rq = vec3(rp.x - clamp(rp.x, rr * 0.8, rr * 1.18 + len), rp.y, o.z);
+    float len = rr * (0.29 + 0.06 * sin(uFlow * 5.0 + id * 1.9)) * uSky.x;
+    vec3 rq = vec3(rp.x - clamp(rp.x, rr * 0.8, rr * 1.1 + len), rp.y, o.z);
     d = smin(d, length(rq) - sr * 0.13 * uSky.x, 0.1);
   }
   d = lobePush(d, q, vec3(0.6), 0.32); // the orb only: the lobes would fill the moon's bite
@@ -435,7 +444,7 @@ vec2 faceSpace(vec3 p, float id) {
   if (isWeather(id)) return (p.xy / (uRadius * weatherScale()) - uFaceT.xy) / uFaceT.z;
   if (isClock(id)) return p.xy / (uRadius * clockScale());
   vec2 f = alertFrame(p).xy / uRadius;
-  return id < 1.5 ? (f + vec2(0.0, 0.3)) / 0.62 : f / 0.95;
+  return id < 1.5 ? (f / VOL_TRIANGLE + vec2(0.0, 0.3)) / 0.62 : f / VOL_SQUARE / 0.95;
 }
 
 // Approximate ellipse distance (exact on the axes), good enough for a glow.
@@ -546,7 +555,8 @@ void main() {
   col += uColor * min(uGlow, 1.2) * (0.026 * exp(-out_ * 5.0) + 0.0025 * exp(-out_ * 1.8));
 
   // Bounding sphere: rays that miss it skip the march.
-  float rb = (uShapeA > 2.5 || uShapeB > 2.5) ? 1.7 : r * 1.5 + 0.1; // the clock and the weather are wider
+  // The clock and the weather are wider; the alert shapes reach further at their corners.
+  float rb = (uShapeA > 2.5 || uShapeB > 2.5) ? 1.9 : (isAlert(uShapeA) || isAlert(uShapeB)) ? 1.5 : r * 1.5 + 0.1;
   rb *= uBodyR;
   float h = b * b - (dot(rc, rc) - rb * rb);
   if (h > 0.0) {
