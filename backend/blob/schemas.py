@@ -55,8 +55,6 @@ class ErrorCode(StrEnum):
 class Hello(BaseModel):
     type: Literal["hello"] = "hello"
     version: str
-    token: str
-    device: str
 
 
 class Tap(BaseModel):

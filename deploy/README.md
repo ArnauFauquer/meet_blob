@@ -34,7 +34,8 @@ Run locally without a GPU or real models:
 ```bash
 docker run --rm -p 8000:8000 --read-only --tmpfs /tmp:exec -v blob-data:/data \
   -e HERMES_URL=http://host.docker.internal:8642 -e HERMES_KEY=... -e HERMES_MODEL=hermes-agent \
-  -e DEVICE_TOKEN=... -e BLOB_FAKE_MODELS=true blob
+  -e PUBLIC_URL=http://localhost:8000 -e OIDC_ISSUER=https://id.example.com \
+  -e OIDC_CLIENT_ID=... -e ALERT_TOKEN=... -e BLOB_FAKE_MODELS=true blob
 ```
 
 `/tmp` must allow exec: phonemizer (Kokoro) copies `libespeak-ng.so` there and loads it. Docker's
@@ -49,12 +50,11 @@ docker run --rm -p 8000:8000 --read-only --tmpfs /tmp:exec -v blob-data:/data \
 | Entry point | `blob` (`blob.main:run`) |
 | Writable paths | `/data` (volume) and `/tmp` only; the root filesystem can be read-only |
 | `/data` | `blob.db` (SQLite) and `models/` (faster-whisper and Kokoro, downloaded on first start, about 3.3 GB with `large-v3`) |
-| `/config/devices.json` | per-device flags (`DEVICES_PATH`), mounted from a ConfigMap |
 | Probes | liveness `GET /healthz` (always 200 while the process runs); readiness and startup `GET /readyz` (503 until the database is open and both models are loaded) |
 | GPU | one `nvidia.com/gpu`; the pod needs the `nvidia` RuntimeClass on Talos so the driver libraries are injected |
 
 Environment set by the image: `HOST`, `PORT`, `DB_PATH=/data/blob.db`, `MODEL_DIR=/data/models`,
-`HF_HOME=/data/models/huggingface`, `STATIC_DIR=/app/web/dist`, `DEVICES_PATH=/config/devices.json`.
+`HF_HOME=/data/models/huggingface`, `STATIC_DIR=/app/web/dist`.
 
 Environment the chart must provide:
 
@@ -64,7 +64,13 @@ Environment the chart must provide:
 | `HERMES_MODEL` | values (`hermes-agent`) |
 | `HERMES_HISTORY_MODE` | values (`session`) |
 | `TZ` | values (`Europe/Madrid`; quiet hours are local time) |
-| `HERMES_KEY`, `ALERT_TOKEN`, `DEVICE_TOKEN` | Secret `blob-secrets` (Terraform) |
+| `PUBLIC_URL` | values (`https://blob.faukinator.com`) |
+| `OIDC_ISSUER` | values (Pocket ID's public URL, the browser must reach the same URL) |
+| `OIDC_CLIENT_ID` | values (from the Pocket ID client) |
+| `HERMES_KEY`, `ALERT_TOKEN`, `OIDC_CLIENT_SECRET` | Secret `blob-secrets` (Terraform); `DEVICE_TOKEN` is no longer read |
+
+Blob must reach `OIDC_ISSUER` from inside the cluster (discovery, keys and the token request).
+The devices ConfigMap and its `/config` mount are no longer used.
 
 Every other setting keeps the default in `backend/blob/config.py`.
 
@@ -80,4 +86,7 @@ Every other setting keeps the default in `backend/blob/config.py`.
 4. `image.tag` in `faukinator/blob/values.yaml` holds `X.Y.Z@sha256:<digest>`; Renovate keeps it
    current. The chart refuses to render without it.
 5. Point `blob.faukinator.com` at Traefik if the Pi-hole wildcard does not already cover it.
-6. Install the tablet once with `https://blob.faukinator.com/#t=<DEVICE_TOKEN>&device=tablet`.
+6. In Pocket ID: an OIDC client with callback `https://blob.faukinator.com/auth/callback`, the
+   groups `blob-sound` and `blob-wake`, and a kiosk user for the tablet in both groups.
+7. Open `https://blob.faukinator.com/` on the tablet and sign in as the kiosk user once. A tablet
+   already open on the old page reloads by itself at the next deploy and goes to sign-in.

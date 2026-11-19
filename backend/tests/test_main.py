@@ -80,11 +80,12 @@ def test_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         "HERMES_URL": "http://hermes",
         "HERMES_KEY": "k",
         "HERMES_MODEL": "m",
-        "DEVICE_TOKEN": "t",
+        "PUBLIC_URL": "https://blob.test",
+        "OIDC_ISSUER": "https://id.test",
+        "OIDC_CLIENT_ID": "c",
         "ALERT_TOKEN": "a",
         "PORT": "8123",
         "DB_PATH": str(tmp_path / "b.db"),
-        "DEVICES_PATH": str(tmp_path / "d.json"),
     }.items():
         monkeypatch.setenv(name, value)
     calls: list[tuple[Any, dict[str, Any]]] = []

@@ -56,10 +56,10 @@ def test_bad_token_is_401(api: TestClient, headers: dict[str, str]) -> None:
     assert api.delete("/alerts/x", headers=headers).status_code == 401
 
 
-def test_device_token_is_not_the_alert_token(api: TestClient) -> None:
-    from tests.conftest import TOKEN
+def test_a_signed_in_browser_cannot_use_alerts(api: TestClient) -> None:
+    from tests.conftest import signed_in
 
-    assert api.get("/alerts", headers={"Authorization": f"Bearer {TOKEN}"}).status_code == 401
+    assert api.get("/alerts", headers=signed_in("tablet")).status_code == 401
 
 
 def test_new_key_201_then_update_200(api: TestClient) -> None:

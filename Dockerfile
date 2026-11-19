@@ -56,10 +56,10 @@ RUN --mount=from=ghcr.io/astral-sh/uv:0.13.9,source=/uv,target=/bin/uv \
 COPY --from=web /src/web/dist /app/web/dist
 
 RUN useradd --uid 10001 --user-group --no-create-home --home-dir /tmp --shell /usr/sbin/nologin blob \
- && mkdir -p /data /config \
+ && mkdir -p /data \
  && chown 10001:10001 /data
 
-# Paths match the chart: PVC at /data, devices ConfigMap at /config/devices.json.
+# Paths match the chart: PVC at /data.
 # Other settings keep the defaults in backend/blob/config.py (one source of truth).
 # HOME and HF_HOME keep library caches off the read-only root filesystem.
 ENV PATH=/app/.venv/bin:$PATH \
@@ -71,8 +71,7 @@ ENV PATH=/app/.venv/bin:$PATH \
     DB_PATH=/data/blob.db \
     MODEL_DIR=/data/models \
     HF_HOME=/data/models/huggingface \
-    STATIC_DIR=/app/web/dist \
-    DEVICES_PATH=/config/devices.json
+    STATIC_DIR=/app/web/dist
 
 WORKDIR /app
 USER 10001:10001

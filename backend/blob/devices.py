@@ -1,17 +1,30 @@
-"""Per-device flags from DEVICES_PATH, served by GET /device-config."""
+"""Per-browser flags from the signed-in user's Pocket ID groups, served by GET /device-config.
 
-import json
-import logging
-from pathlib import Path
+A kiosk (the tablet) signs in as its own Pocket ID user and is put in the sound and wake groups;
+a person signing in on a desktop is in neither, so that page only answers taps and stays silent.
+"""
 
-from pydantic import BaseModel, TypeAdapter
+from dataclasses import dataclass
 
-log = logging.getLogger(__name__)
+from pydantic import BaseModel
+
+from .auth import User
+from .config import Settings
 
 
-class Device(BaseModel):
-    sound: bool = False
-    wake: bool = True
+@dataclass(frozen=True)
+class Device:
+    name: str  # the user's name: diagnostics, logs and debug audio file names
+    sound: bool
+    wake: bool
+
+
+def device_for(user: User, settings: Settings) -> Device:
+    return Device(
+        name=user.name,
+        sound=settings.oidc_sound_group in user.groups,
+        wake=settings.oidc_wake_group in user.groups,
+    )
 
 
 class DeviceConfig(BaseModel):
@@ -23,18 +36,3 @@ class DeviceConfig(BaseModel):
     listen_no_speech_s: float
     silence_rms: float
     debug_audio: bool = False  # DEBUG_AUDIO_DIR is set: the page may send wake_clip audio
-
-
-_devices = TypeAdapter(dict[str, Device])
-
-
-def load_devices(path: str) -> dict[str, Device]:
-    """A missing file means no device has sound or wake; a malformed file stops startup."""
-    p = Path(path)
-    if not p.exists():
-        log.warning("devices file %s not found; every device gets sound=false, wake=true", path)
-        return {}
-    try:
-        return _devices.validate_python(json.loads(p.read_text()))
-    except ValueError as e:
-        raise ValueError(f"malformed devices file {path}: {e}") from e

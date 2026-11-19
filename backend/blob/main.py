@@ -7,7 +7,7 @@ import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Annotated, Any, Protocol
 
 import httpx
 import numpy as np
@@ -20,13 +20,13 @@ from numpy.typing import NDArray
 from starlette.responses import Response
 from starlette.types import Scope
 
-from . import alerts
+from . import alerts, oidc
 from .alerts import Alerts, run_scheduler
-from .auth import require_device_token
+from .auth import Sessions, User, require_user, websocket_user
 from .config import Settings
 from .db import Db
 from .debugaudio import AudioDump
-from .devices import Device, DeviceConfig, load_devices
+from .devices import DeviceConfig, device_for
 from .fakes import FakeStt, FakeTts
 from .gpu import Gpu
 from .hermes import HermesClient
@@ -90,9 +90,9 @@ def create_app(
     *,
     models: tuple[SttModel, TtsModel] | None = None,
     hermes_transport: httpx.AsyncBaseTransport | None = None,
+    oidc_transport: httpx.AsyncBaseTransport | None = None,
     wall: Callable[[], float] = time.time,
 ) -> FastAPI:
-    devices = load_devices(settings.devices_path)  # a malformed file stops startup here
     stt, tts = models or _models(settings)
 
     @asynccontextmanager
@@ -109,7 +109,18 @@ def create_app(
             settings.hermes_alerts_url,
             transport=hermes_transport,
         )
-        st.hub = Hub(settings.device_token, lambda: st.ready, devices)
+        st.sessions = Sessions(st.db, settings.session_idle_days, wall)
+        st.oidc = oidc.OidcClient(
+            settings.oidc_issuer,
+            settings.oidc_client_id,
+            settings.oidc_client_secret,
+            f"{settings.public_url}/auth/callback",
+            transport=oidc_transport,
+            wall=wall,
+        )
+        st.hub = Hub(lambda: st.ready)
+        if settings.auth_disabled:
+            log.warning("AUTH_DISABLED is on: no sign-in, everyone is the user 'dev' (local only)")
         if settings.debug_audio_dir:
             st.hub.audio_dump = AudioDump(
                 settings.debug_audio_dir, settings.debug_audio_keep, settings.debug_wake_keep
@@ -152,6 +163,7 @@ def create_app(
                 with suppress(asyncio.CancelledError):
                     await t
             await st.hermes.aclose()
+            await st.oidc.aclose()
             st.db.close()
 
     app = FastAPI(title="Blob", lifespan=lifespan)
@@ -164,7 +176,6 @@ def create_app(
         )
 
     app.state.settings = settings
-    app.state.devices = devices
     app.state.ready = False
     app.state.hermes_reachable = None
 
@@ -178,11 +189,11 @@ def create_app(
         ready = bool(request.app.state.ready)
         return JSONResponse({"ready": ready}, status_code=200 if ready else 503)
 
-    @app.get("/device-config", dependencies=[Depends(require_device_token)])
-    async def device_config(device: str) -> DeviceConfig:
-        flags = devices.get(device, Device())
+    @app.get("/device-config")
+    async def device_config(user: Annotated[User, Depends(require_user)]) -> DeviceConfig:
+        flags = device_for(user, settings)
         return DeviceConfig(
-            device=device,
+            device=flags.name,
             sound=flags.sound,
             wake=flags.wake,
             quiet_hours=settings.quiet_hours,
@@ -193,10 +204,13 @@ def create_app(
         )
 
     app.include_router(alerts.router)
+    app.include_router(oidc.router)
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket) -> None:
-        await websocket.app.state.hub.serve(websocket)
+        user = await websocket_user(websocket)
+        device = device_for(user, settings) if user else None
+        await websocket.app.state.hub.serve(websocket, device)
 
     static = Path(settings.static_dir)
     if (static / "index.html").is_file():
@@ -243,6 +257,8 @@ async def _retention(app: FastAPI, days: int) -> None:
         try:
             n = await app.state.db.delete_turns_older_than(days, time.time())
             log.info("deleted %d turns older than %d days", n, days)
+            n = await app.state.sessions.delete_idle()
+            log.info("deleted %d idle sessions", n)
         except Exception:
             log.exception("retention failed")
         await asyncio.sleep(RETENTION_EVERY_S)

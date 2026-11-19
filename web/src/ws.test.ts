@@ -47,8 +47,6 @@ function make(over: Partial<SocketOptions> = {}) {
   const statuses: string[] = [];
   const sock = new BlobSocket({
     url: 'ws://x/ws',
-    token: 'tok',
-    device: 'desk',
     version: '1.0',
     onMessage: (m, b) => got.push([m, b]),
     onStatus: (s) => statuses.push(s),
@@ -74,7 +72,7 @@ describe('BlobSocket', () => {
   it('sends hello first and is ready only after hello_ok', () => {
     const { sock, statuses } = make();
     last().open();
-    expect(last().sentJson()[0]).toEqual({ type: 'hello', version: '1.0', token: 'tok', device: 'desk' });
+    expect(last().sentJson()[0]).toEqual({ type: 'hello', version: '1.0' });
     expect(sock.send({ type: 'tap' })).toBe(false);
     last().json({ type: 'hello_ok', version: '1.0', ok: true });
     expect(sock.send({ type: 'tap' })).toBe(true);
@@ -145,7 +143,7 @@ describe('BlobSocket', () => {
     const { statuses } = make();
     last().open();
     last().drop(4401);
-    expect(statuses[statuses.length - 1]).toBe('bad_token');
+    expect(statuses[statuses.length - 1]).toBe('signed_out');
     vi.advanceTimersByTime(120_000);
     expect(FakeSocket.all).toHaveLength(1);
   });

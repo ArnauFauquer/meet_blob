@@ -8,9 +8,9 @@ from pathlib import Path
 
 from .schemas import Timings
 
-# 1: turns (S1). 2: alerts (S4). A new version only adds tables or columns, so an older image
-# still opens a newer file.
-SCHEMA_VERSION = 2
+# 1: turns (S1). 2: alerts (S4). 3: sign-in sessions. A new version only adds tables or columns,
+# so an older image still opens a newer file.
+SCHEMA_VERSION = 3
 
 _TURNS = """
 CREATE TABLE IF NOT EXISTS turns (
@@ -41,6 +41,17 @@ CREATE TABLE IF NOT EXISTS alerts (
     acked_at INTEGER
 )
 """
+_SESSIONS = """
+CREATE TABLE IF NOT EXISTS sessions (
+    id_hash TEXT PRIMARY KEY,
+    sub TEXT NOT NULL,
+    name TEXT NOT NULL,
+    groups TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    seen_at INTEGER NOT NULL
+)
+"""
+
 ALERT_COLUMNS = (
     "key",
     "source",
@@ -66,6 +77,7 @@ class Db:
         with self._lock, self._conn:
             self._conn.execute(_TURNS)
             self._conn.execute(_ALERTS)
+            self._conn.execute(_SESSIONS)
             # A newer file keeps its version: later versions only add tables or columns.
             if self.user_version() < SCHEMA_VERSION:
                 self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -138,6 +150,56 @@ class Db:
     async def write_alerts(self, save: list[dict[str, object]], delete: list[str]) -> None:
         """Upsert and delete alert rows in one transaction."""
         await asyncio.to_thread(self._write_alerts, save, delete)
+
+    # Sign-in sessions: the cookie holds a random id, the table only its SHA-256.
+
+    def _insert_session(
+        self, id_hash: str, sub: str, name: str, groups: list[str], now: int
+    ) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO sessions (id_hash, sub, name, groups, created_at, seen_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (id_hash, sub, name, json.dumps(groups), now, now),
+            )
+
+    async def insert_session(
+        self, id_hash: str, sub: str, name: str, groups: list[str], now: int
+    ) -> None:
+        await asyncio.to_thread(self._insert_session, id_hash, sub, name, groups, now)
+
+    def _get_session(self, id_hash: str) -> dict[str, object] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT sub, name, groups, seen_at FROM sessions WHERE id_hash = ?", (id_hash,)
+            ).fetchone()
+        if row is None:
+            return None
+        return {"sub": row[0], "name": row[1], "groups": json.loads(row[2]), "seen_at": row[3]}
+
+    async def get_session(self, id_hash: str) -> dict[str, object] | None:
+        return await asyncio.to_thread(self._get_session, id_hash)
+
+    def _touch_session(self, id_hash: str, now: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE sessions SET seen_at = ? WHERE id_hash = ?", (now, id_hash))
+
+    async def touch_session(self, id_hash: str, now: int) -> None:
+        await asyncio.to_thread(self._touch_session, id_hash, now)
+
+    def _delete_session(self, id_hash: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM sessions WHERE id_hash = ?", (id_hash,))
+
+    async def delete_session(self, id_hash: str) -> None:
+        await asyncio.to_thread(self._delete_session, id_hash)
+
+    def _delete_idle_sessions(self, cutoff: int) -> int:
+        with self._lock, self._conn:
+            return self._conn.execute("DELETE FROM sessions WHERE seen_at < ?", (cutoff,)).rowcount
+
+    async def delete_idle_sessions(self, cutoff: int) -> int:
+        return await asyncio.to_thread(self._delete_idle_sessions, cutoff)
 
     def close(self) -> None:
         # Under the lock: closing while a worker thread writes crashes sqlite3 (seen at shutdown).

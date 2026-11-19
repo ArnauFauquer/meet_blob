@@ -7,10 +7,11 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from blob import __version__
 from blob.alerts import ACKED_KEEP_S, SLEEP_CAP_S, Alerts, run_scheduler
 from blob.db import Db
 from blob.schemas import AlertIn
-from tests.conftest import ALERT_TOKEN, TOKEN, wait_ready
+from tests.conftest import ALERT_TOKEN, signed_in, wait_ready
 from tests.test_hub import recv
 
 NOW = 1_700_000_000
@@ -219,8 +220,8 @@ def test_app_restart_with_real_sqlite_file(app_factory: Any) -> None:
             wait_ready(c)
             states = {a["key"]: a["state"] for a in c.get("/alerts", headers=AUTH).json()}
             assert states == {"door": "active", "t1": "active"}
-            with c.websocket_connect("/ws") as ws:
-                ws.send_json({"type": "hello", "version": "1", "token": TOKEN, "device": "d"})
+            with c.websocket_connect("/ws", headers=signed_in()) as ws:
+                ws.send_json({"type": "hello", "version": __version__})
                 assert recv(ws)["type"] == "hello_ok"
                 snap = recv(ws)
                 by_key = {a["key"]: a for a in snap["alerts"]}

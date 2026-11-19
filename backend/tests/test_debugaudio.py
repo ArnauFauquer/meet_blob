@@ -7,7 +7,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from blob.debugaudio import AudioDump
-from tests.conftest import TOKEN, wait_ready
+from tests.conftest import signed_in, wait_ready
 from tests.test_hub import SPEECH, connect, tap, until, utterance
 
 
@@ -70,7 +70,7 @@ def test_hub_saves_wake_clips_only_when_on(app_factory: Any, tmp_path: Path) -> 
     folder = tmp_path / "dbg"
     with TestClient(app_factory(debug_audio_dir=str(folder))) as c:
         wait_ready(c)
-        cfg = c.get("/device-config?device=tablet", headers={"Authorization": f"Bearer {TOKEN}"})
+        cfg = c.get("/device-config", headers=signed_in("tablet"))
         assert cfg.json()["debug_audio"] is True
         with connect(c, device="tablet") as ws:
             _clip(ws, "pos", SPEECH)
@@ -83,7 +83,7 @@ def test_hub_saves_wake_clips_only_when_on(app_factory: Any, tmp_path: Path) -> 
 
     with TestClient(app_factory()) as c:  # off: the frame is consumed, nothing written, no error
         wait_ready(c)
-        cfg = c.get("/device-config?device=tablet", headers={"Authorization": f"Bearer {TOKEN}"})
+        cfg = c.get("/device-config", headers=signed_in("tablet"))
         assert cfg.json()["debug_audio"] is False
         with connect(c, device="tablet") as ws:
             _clip(ws, "pos", SPEECH)

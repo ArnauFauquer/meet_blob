@@ -10,7 +10,6 @@ from pydantic import BaseModel, ValidationError
 
 from . import __version__, turnlog
 from .alerts import Alerts
-from .auth import token_ok
 from .debugaudio import AudioDump
 from .devices import Device
 from .schemas import (
@@ -38,13 +37,14 @@ log = logging.getLogger(__name__)
 MAX_FRAME = 1 << 20  # 15 s of 16 kHz 16-bit audio is about 480 KB
 MAX_WAKE_CLIP = 10 * 16000 * 2  # 10 s
 CLOSE_BEFORE_HELLO = 4400
-CLOSE_BAD_TOKEN = 4401
+CLOSE_SIGNED_OUT = 4401  # no valid session cookie: the page sends the browser to sign in
 
 
 class Connection:
-    def __init__(self, ws: WebSocket, device: str) -> None:
+    def __init__(self, ws: WebSocket, device: Device) -> None:
         self.ws = ws
-        self.device = device
+        self.device = device.name
+        self.wake = device.wake
         self._lock = asyncio.Lock()
         # utterance or wake_clip header waiting for its binary frame
         self.pending: Utterance | WakeClip | None = None
@@ -64,15 +64,8 @@ Handler = Callable[[Connection, Any], Awaitable[None]]
 
 
 class Hub:
-    def __init__(
-        self,
-        device_token: str,
-        is_ready: Callable[[], bool],
-        devices: dict[str, Device] | None = None,
-    ) -> None:
-        self._token = device_token
+    def __init__(self, is_ready: Callable[[], bool]) -> None:
         self._is_ready = is_ready
-        self._devices = devices or {}
         self.clients: set[Connection] = set()
         self._broadcast_lock = asyncio.Lock()
         self.turns: TurnManager  # set by main once the turn manager exists
@@ -114,9 +107,10 @@ class Hub:
             conv=self.turns.conv, alerts=self.alerts.items(), timers=self.alerts.timers()
         )
 
-    async def serve(self, ws: WebSocket) -> None:
+    async def serve(self, ws: WebSocket, device: Device | None) -> None:
+        """device is None when the upgrade carried no valid session: hello is answered with 4401."""
         await ws.accept()
-        conn = await self._hello(ws)
+        conn = await self._hello(ws, device)
         if conn is None:
             return
         self.clients.add(conn)
@@ -134,7 +128,7 @@ class Hub:
             self.clients.discard(conn)
             await self.turns.drop_owner(conn)
 
-    async def _hello(self, ws: WebSocket) -> Connection | None:
+    async def _hello(self, ws: WebSocket, device: Device | None) -> Connection | None:
         msg = await ws.receive()
         if msg["type"] == "websocket.disconnect":
             return None
@@ -143,10 +137,13 @@ class Hub:
         except ValidationError:
             await ws.close(CLOSE_BEFORE_HELLO)
             return None
-        if not token_ok(hello.token, self._token):
-            await ws.close(CLOSE_BAD_TOKEN)
+        if device is None:
+            if hello.version != __version__:
+                # A page from before this version: it reloads into the current one, which signs in.
+                await ws.send_text(HelloOk(version=__version__, ok=False).model_dump_json())
+            await ws.close(CLOSE_SIGNED_OUT)
             return None
-        conn = Connection(ws, hello.device)
+        conn = Connection(ws, device)
         await conn.send(HelloOk(version=__version__, ok=hello.version == __version__))
         return conn
 
@@ -189,8 +186,8 @@ class Hub:
             await conn.send(Error(code=ErrorCode.BUSY))
 
     async def _wake(self, conn: Connection, msg: Wake) -> None:
-        """Starts a turn like a tap, only from a device marked wake=true in devices.json."""
-        if not self._devices.get(conn.device, Device()).wake:
+        """Starts a turn like a tap, only from a browser whose user is in the wake group."""
+        if not conn.wake:
             await conn.send(Error(code=ErrorCode.BAD_MESSAGE))
         else:
             await self._tap(conn, msg)

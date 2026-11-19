@@ -22,7 +22,7 @@ export const ERROR_CODES = ['busy', 'bad_message', 'not_ready'] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
 export const CLOSE_BEFORE_HELLO = 4400;
-export const CLOSE_BAD_TOKEN = 4401;
+export const CLOSE_SIGNED_OUT = 4401; // no valid session cookie: sign in again
 
 export const PCM_RATE = 16000;
 
@@ -51,7 +51,7 @@ export interface Timings {
 }
 
 // Client to server
-export interface HelloMsg { type: 'hello'; version: string; token: string; device: string }
+export interface HelloMsg { type: 'hello'; version: string }
 export interface TapMsg { type: 'tap' }
 export interface UtteranceMsg {
   type: 'utterance';
