@@ -17,6 +17,7 @@ import fragmentShader from './blob.frag?raw';
 import vertexShader from './blob.vert?raw';
 import {
   CLOCK_LOOK,
+  CLOCK_REACH,
   LOBE_COUNT,
   SHAPE,
   alertLook,
@@ -122,7 +123,7 @@ export interface FrameInput {
   alert?: Pick<AlertItem, 'source' | 'urgency'> | null; // the top alert, drawn when view is 'alert'
   clock?: Date | null; // the time to show: the idle blob rests as a clock while this is set
   weather?: Sky | null; // the sky outside: the idle blob shows it while this is set (before the clock)
-  lift?: number; // the resting clock or sky rises this much (world units) to leave room under it
+  room?: number; // 0..1 of the screen's height taken at the bottom (the week strip): the resting clock or sky fits above it
 }
 
 function targetOf(i: FrameInput): { look: Look; shape: number } {
@@ -174,7 +175,8 @@ export class BlobRenderer {
   private urgentW = 0; // 0..1 weight of the urgent tremble
   private clockW = 0; // 0..1 weight of the clock float
   private restW = 0; // 0..1 weight of a resting shape (clock or sky)
-  private lift = 0; // eased FrameInput.lift
+  private restY = 0; // resting shape: eased offset and scale that fit it above FrameInput.room
+  private restFit = 1;
   private glance = { n: 1, t: 0, x: 0, y: 0 }; // eye saccades: n-th glance, time in it, current offset
   private lastView: View | null = null;
   private mouth = newMouth();
@@ -313,7 +315,8 @@ export class BlobRenderer {
     this.urgentW = alert?.urgency === 'urgent' && view === 'alert' ? 1 : 0;
     this.clockW = shape === SHAPE.clock ? 1 : 0;
     this.restW = shape === SHAPE.clock || shape === SHAPE.weather ? 1 : 0;
-    this.lift = 0;
+    this.restY = 0;
+    this.restFit = 1;
     this.glance = { n: 1, t: 0, x: 0, y: 0 };
   }
 
@@ -466,7 +469,7 @@ export class BlobRenderer {
     }
     const s = this.sky;
     this.fallT += dt * (0.75 - 0.5 * s.snow);
-    (u.uSky.value as Vector4).set(s.sun, s.moon, s.cloud, 0);
+    (u.uSky.value as Vector4).set(s.sun, s.moon, s.cloud, s.size);
     (u.uFall.value as Vector3).set(s.fall, s.snow, this.fallT);
     (u.uFaceT.value as Vector3).set(s.faceX, s.faceY, s.faceS);
     if (fi.weather?.kind !== 'storm' || this.morph.a !== SHAPE.weather || this.morph.b !== SHAPE.weather) return;
@@ -500,7 +503,16 @@ export class BlobRenderer {
     this.urgentW += ((fi.view === 'alert' && fi.alert?.urgency === 'urgent' ? 1 : 0) - this.urgentW) * k;
     this.clockW += ((shape === SHAPE.clock ? 1 : 0) - this.clockW) * k;
     this.restW += ((shape === SHAPE.clock || shape === SHAPE.weather ? 1 : 0) - this.restW) * k;
-    this.lift += ((fi.lift ?? 0) - this.lift) * (1 - Math.exp(-dt / 0.6));
+    // The resting shape centres itself in the free space above the strip and
+    // shrinks only if it does not fit there (its volume stays the sphere's otherwise).
+    const [top, bottom] = shape === SHAPE.weather ? [this.sky.top, this.sky.bottom] : CLOCK_REACH;
+    const half = 1.417; // the camera sees +-1.417 world units at the body's depth
+    const hi = half - 0.08;
+    const lo = -half + 2 * half * (fi.room ?? 0) + 0.06;
+    const fit = Math.min(1, (hi - lo) / (top - bottom));
+    const ke = 1 - Math.exp(-dt / 0.6);
+    this.restFit += (fit - this.restFit) * ke;
+    this.restY += ((fi.room ? (hi + lo) / 2 - (fit * (top + bottom)) / 2 : 0) - this.restY) * ke;
 
     // Kicks: a crouch before a morph jumps, a landing after it, a small
     // jiggle on any other change of view.
@@ -545,7 +557,7 @@ export class BlobRenderer {
     const calm = 1 - this.actW; // the ambient motion yields to an act
 
     const bounce = Math.max(0, Math.sin(phase)) * calm;
-    const hop = HOP * air + this.alertW * (0.1 - 0.03 * this.urgentW) * bounce + this.restW * (0.035 * Math.sin(t * 0.8) + this.lift) + p.y;
+    const hop = HOP * air + this.alertW * (0.1 - 0.03 * this.urgentW) * bounce + this.restW * (0.035 * Math.sin(t * 0.8) + this.restY) + p.y;
     const shake = this.urgentW * calm * (0.011 * Math.sin(t * 47) + 0.007 * Math.sin(t * 31 + 1.3));
     const x = shake + p.x;
     (u.uBodyPos.value as Vector3).set(x, hop, p.z);
@@ -573,6 +585,7 @@ export class BlobRenderer {
     const body = (u.uBody.value as Matrix3).setFromMatrix4(this.rot.makeRotationFromEuler(this.euler)).transpose();
     body.multiply(this.shear.set(1, -this.lean, 0, 0, 1, 0, 0, 0, 1));
     body.premultiply(this.scale.set(Math.sqrt(st), 0, 0, 0, 1 / st, 0, 0, 0, Math.sqrt(st)));
+    body.multiplyScalar(1 / (1 + this.restW * (this.restFit - 1))); // a resting shape too big for its room
     const big = largestStretch(body);
     u.uBodyK.value = 1 / big;
     u.uBodyR.value = largestStretch(this.inv.copy(body).invert());

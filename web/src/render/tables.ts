@@ -77,6 +77,24 @@ export interface SkyParts {
   faceX: number;
   faceY: number;
   faceS: number;
+  size: number; // scale that gives the shape the sphere's volume (uSky.w)
+  top: number; // highest and lowest reach of the shape, world units from its centre
+  bottom: number;
+}
+
+// Scales that give each sky the sphere's volume (measured like VOL_* in
+// blob.frag), and its reach up and down at that size: the drops do not count
+// in the volume, they leave the body and come back, but they need room below.
+const SKY_SIZE = { sun: 1.562, moon: 2.011, partly: 1.536, cloud: 1.674 };
+const SKY_REACH = { sun: [1.14, -1.14], moon: [0.97, -0.97], partly: [1.17, -0.49], cloud: [0.8, -0.54], fall: -1.51 };
+
+// Reach of the resting clock, up and down from its centre (world units).
+export const CLOCK_REACH: [number, number] = [0.6, -0.6];
+
+function reach(kind: WeatherKind, cloud: number, moon: number): { top: number; bottom: number } {
+  const [top, bottom] = kind === 'partly' ? SKY_REACH.partly : cloud ? SKY_REACH.cloud : moon ? SKY_REACH.moon : SKY_REACH.sun;
+  const falls = kind === 'rain' || kind === 'snow' || kind === 'storm';
+  return { top, bottom: falls ? SKY_REACH.fall : bottom };
 }
 
 export function skyParts({ kind, day }: Sky): SkyParts {
@@ -84,7 +102,7 @@ export function skyParts({ kind, day }: Sky): SkyParts {
   const cloud = kind !== 'clear' ? 1 : 0;
   const moon = orb && !day ? 1 : 0;
   // Alone, the moon's face sits on the crescent left by the bite; with a cloud it sits on the cloud.
-  const face = cloud ? { faceX: 0, faceY: -0.02, faceS: 0.8 } : moon ? { faceX: -0.3, faceY: -0.16, faceS: 0.58 } : { faceX: 0, faceY: 0, faceS: 0.9 };
+  const face = cloud ? { faceX: 0, faceY: -0.02, faceS: 0.8 } : moon ? { faceX: -0.36, faceY: -0.2, faceS: 0.5 } : { faceX: 0, faceY: 0, faceS: 0.9 };
   return {
     sun: orb && day ? 1 : 0,
     moon,
@@ -92,6 +110,8 @@ export function skyParts({ kind, day }: Sky): SkyParts {
     fall: kind === 'rain' || kind === 'snow' || kind === 'storm' ? 1 : 0,
     snow: kind === 'snow' ? 1 : 0,
     ...face,
+    size: kind === 'partly' ? SKY_SIZE.partly : cloud ? SKY_SIZE.cloud : moon ? SKY_SIZE.moon : SKY_SIZE.sun,
+    ...reach(kind, cloud, moon),
   };
 }
 

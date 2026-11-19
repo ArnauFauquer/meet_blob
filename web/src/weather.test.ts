@@ -29,6 +29,18 @@ describe('weather', () => {
     expect(skyParts({ kind: 'snow', day: false })).toMatchObject({ moon: 0, cloud: 1, fall: 1, snow: 1 });
   });
 
+  it("grows every sky to the sphere's volume, and makes room below for falling drops", () => {
+    for (const kind of ['clear', 'partly', 'cloudy', 'fog', 'rain', 'snow', 'storm'] as const)
+      for (const day of [true, false]) {
+        const p = skyParts({ kind, day });
+        expect(p.size).toBeGreaterThan(1);
+        expect(p.top).toBeGreaterThan(0);
+        expect(p.bottom).toBeLessThan(0);
+      }
+    expect(skyParts({ kind: 'clear', day: false }).size).toBeGreaterThan(skyParts({ kind: 'clear', day: true }).size); // the crescent is thin
+    expect(skyParts({ kind: 'rain', day: true }).bottom).toBeLessThan(skyParts({ kind: 'cloudy', day: true }).bottom);
+  });
+
   it('gives each sky its own colours, as copies', () => {
     const sun = weatherLook({ kind: 'clear', day: true });
     const rain = weatherLook({ kind: 'rain', day: true });

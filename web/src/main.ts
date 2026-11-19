@@ -157,9 +157,7 @@ function view(): View {
 
 let idleSince = performance.now(); // start of the current unbroken idle stretch
 let weather: Weather | null = null;
-// The resting blob rises over the week strip (world units, the blob radius is
-// 0.78); the sky more than the clock, for the drops falling from it.
-const REST_LIFT = { clock: 0.16, weather: 0.26 };
+let stripRoom = 0.25; // share of the screen's height the week strip takes at the bottom (measured)
 
 // After CLOCK_AFTER_MS of idle the blob rests: as a clock, taking turns with
 // the sky outside when the backend has the weather.
@@ -184,7 +182,7 @@ function frameInput(): FrameInput {
     alert: v === 'alert' ? topAlert(alerts) : null,
     clock: r !== 'none' ? new Date() : null,
     weather: sky,
-    lift: weather && r !== 'none' ? REST_LIFT[r] : 0,
+    room: weather && r !== 'none' ? stripRoom : 0,
   };
 }
 
@@ -196,6 +194,7 @@ function showWeather(): void {
   const html = weather && r !== 'none' ? weatherHtml(weather, r === 'weather') : '';
   el.classList.toggle('on', !!html);
   if (html && html !== weatherShown) el.innerHTML = weatherShown = html;
+  if (html) stripRoom = Math.min(0.5, Math.max(0, 1 - el.getBoundingClientRect().top / innerHeight));
 }
 setInterval(showWeather, 500);
 
