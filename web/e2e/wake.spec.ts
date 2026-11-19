@@ -1,7 +1,7 @@
 // S3: the wake word from a fake microphone playing synthetic Kokoro speech
 // ("Hey Blob.", then "What time is it?", then silence, looped), with the trained
-// hey_blob model that wake.json selects. Against a real backend the device hf-wake
-// needs wake=true in config/devices.json.
+// hey_blob model that wake.json selects. Against a real backend BLOB_SESSION must
+// belong to a user in the wake group.
 import { expect, test } from '@playwright/test';
 import { micArgs } from './mics';
 import { dbg, openBlob, recv, sent, tracksStopped, waitFor } from './helpers';

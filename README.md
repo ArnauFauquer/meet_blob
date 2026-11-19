@@ -15,8 +15,9 @@ ask a question in Spanish, Catalan or English. Blob turns the speech into text, 
 
 The design is [`docs/designs/blob_design.md`](docs/designs/blob_design.md). It covers four
 slices: S1 tap-to-talk on the desktop, S2 tablet and deployment, S3 hands-free, S4 alerts and
-timers. The backend implements S1 and the S2 backend parts (device token, `/device-config`,
-serving the built page).
+timers. The backend implements S1 and the S2 backend parts (sign-in, `/device-config`,
+serving the built page). Browsers sign in with OpenID Connect (Pocket ID); see
+[Sign-in](#sign-in).
 
 ## Backend quickstart
 
@@ -27,7 +28,7 @@ from the `espeakng-loader` wheel.
 ```sh
 cd backend
 uv sync
-cp ../.env.example .env        # then edit: HERMES_URL, HERMES_KEY, HERMES_MODEL, DEVICE_TOKEN, ALERT_TOKEN
+cp ../.env.example .env        # then edit: HERMES_*, PUBLIC_URL, OIDC_ISSUER, OIDC_CLIENT_ID, ALERT_TOKEN
 ```
 
 ### Fast run, no models (`BLOB_FAKE_MODELS=1`)
@@ -42,18 +43,16 @@ or run end-to-end tests in seconds.
 uv run python tests/fakes/fake_hermes.py --port 8642     # --mode error|markdown|question, --delay S
 
 # terminal 2
-BLOB_FAKE_MODELS=1 HERMES_URL=http://127.0.0.1:8642 HERMES_KEY=dev HERMES_MODEL=hermes-agent \
-DEVICE_TOKEN=devtoken ALERT_TOKEN=alerttoken DB_PATH=./blob.db STATIC_DIR=../web/dist \
-DEVICES_PATH=../config/devices.example.json uv run blob
+BLOB_FAKE_MODELS=1 AUTH_DISABLED=1 HERMES_URL=http://127.0.0.1:8642 HERMES_KEY=dev \
+HERMES_MODEL=hermes-agent ALERT_TOKEN=alerttoken DB_PATH=./blob.db STATIC_DIR=../web/dist uv run blob
 ```
 
 ### Real models on a CPU
 
 ```sh
 STT_MODEL=small STT_COMPUTE=int8 MODEL_DIR=.models \
-HERMES_URL=http://127.0.0.1:8642 HERMES_KEY=dev HERMES_MODEL=hermes-agent \
-DEVICE_TOKEN=devtoken ALERT_TOKEN=alerttoken DB_PATH=./blob.db STATIC_DIR=../web/dist \
-DEVICES_PATH=../config/devices.example.json uv run blob
+AUTH_DISABLED=1 HERMES_URL=http://127.0.0.1:8642 HERMES_KEY=dev HERMES_MODEL=hermes-agent \
+ALERT_TOKEN=alerttoken DB_PATH=./blob.db STATIC_DIR=../web/dist uv run blob
 ```
 
 The first start downloads the whisper model from Hugging Face and the Kokoro files
@@ -66,13 +65,15 @@ gets `error{not_ready}`. Production defaults are `STT_MODEL=large-v3`,
 
 ```sh
 uv run python scripts/make_test_clips.py          # Kokoro-made clips in tests/clips/ (gitignored)
-uv run python scripts/e2e_turn.py --url ws://127.0.0.1:8000/ws --token devtoken \
+uv run python scripts/e2e_turn.py --url ws://127.0.0.1:8000/ws --session <blob_session cookie> \
     --wav tests/clips/es.wav --expect ok
 ```
 
 `e2e_turn.py` also takes `--empty`, `--cancel-after S`, `--busy-check`,
-`--expect-error not_ready`, `--save-tts out.wav`, and (S3) `--wake [--followup]` with
-`--device tablet` and `--expect-followup true|false`. `scripts/e2e_alerts.py` drives the S4 flows
+`--expect-error not_ready`, `--save-tts out.wav`, and (S3) `--wake [--followup]` (the session's
+user must be in the wake group) and `--expect-followup true|false`. The scripts sign in with the
+`blob_session` cookie of a browser that signed in to that backend (copy it from the browser's
+developer tools). `scripts/e2e_alerts.py` drives the S4 flows
 (alert over HTTP, `alert_read`, `alert_ack`, a 2 s timer, a spoken timer through the timer rule,
 `wake` gating); see [`docs/testing/exit-tests.md`](docs/testing/exit-tests.md). Other tools: `scripts/stt_cli.py` (transcribe
 a WAV), `scripts/tts_cli.py` (synthesise text), `scripts/timings_report.py` (SC1 median).
@@ -81,18 +82,44 @@ a WAV), `scripts/tts_cli.py` (synthesise text), `scripts/timings_report.py` (SC1
 
 | Path | What |
 | --- | --- |
-| `/ws` | the WebSocket ([`protocol/messages.json`](protocol/messages.json)); first message `hello` with the device token |
+| `/ws` | the WebSocket ([`protocol/messages.json`](protocol/messages.json)); needs the session cookie (else close 4401 after `hello`) |
 | `/healthz` | always 200 while the process runs; body `{alive, ready, hermes_reachable}` |
 | `/readyz` | 503 until the database is open and both models are loaded, then 200 |
-| `/device-config?device=NAME` | `Authorization: Bearer DEVICE_TOKEN`; the device's `sound`/`wake` flags and page limits |
+| `/device-config` | session cookie (401 otherwise); the user's name, `sound`/`wake` flags from their groups, and page limits |
+| `/auth/login`, `/auth/callback`, `/auth/logout` | sign-in with the OIDC provider ([Sign-in](#sign-in)) |
 | `/alerts` | `Authorization: Bearer ALERT_TOKEN`; `POST`, `GET`, `DELETE /alerts/{key}` ([`docs/alerts.md`](docs/alerts.md)) |
 | `/` | the built page from `STATIC_DIR` (`index.html` with `Cache-Control: no-cache`), or 404 with a message if it is not built |
 
 ### Configuration
 
 Every environment variable, its default and its slice is in [`.env.example`](.env.example).
-Per-device flags live in `config/devices.json` (example:
-[`config/devices.example.json`](config/devices.example.json)).
+
+### Sign-in
+
+Browsers sign in with OpenID Connect; the homelab provider is Pocket ID. The backend runs the
+authorization code flow with PKCE: a signed-out page goes to `/auth/login`, which sends the
+browser to Pocket ID (passkey), and `/auth/callback` verifies the ID token against the provider's
+keys, stores a session in SQLite and sets the `blob_session` cookie (HttpOnly, SameSite=Lax,
+Secure on https). The cookie rides on `/device-config` and the WebSocket upgrade; the WebSocket
+also checks that a browser's `Origin` is `PUBLIC_URL`. A session ends after `SESSION_IDLE_DAYS`
+without use, or on `POST /auth/logout`.
+
+There are no device names or `devices.json` any more. A browser's flags come from its user's
+Pocket ID groups, read at sign-in: `blob-sound` (`OIDC_SOUND_GROUP`) turns the alert chime on and
+`blob-wake` (`OIDC_WAKE_GROUP`) turns hands-free listening on. Give the tablet its own Pocket ID
+user in both groups; people signing in on a desktop are in neither, so their page answers taps
+only. After changing someone's groups, open `/auth/login` on that browser to pick them up.
+`ALERT_TOKEN` stays: Hermes and Home Assistant are not browsers.
+
+For local development, `AUTH_DISABLED=1` skips sign-in: the OIDC settings are not needed, every
+browser and script is the user `dev` in both groups (sound and wake on), `/auth/login` just
+returns to the page, and the scripts' `--session` can be any value. The backend logs a warning
+at startup. Never turn it on where other machines can reach Blob.
+
+Pocket ID setup: create an OIDC client with callback URL `PUBLIC_URL/auth/callback` (for example
+`https://blob.faukinator.com/auth/callback`), either confidential (set `OIDC_CLIENT_SECRET`) or
+public with PKCE, and optionally restrict it to a group under "Allowed user groups". Create the
+groups `blob-sound` and `blob-wake`.
 
 ### Tests
 
@@ -130,22 +157,22 @@ The page is a static TypeScript app in `web/` (Vite, three.js, vitest, Playwrigh
 ```sh
 cd web
 npm ci
-npm run dev          # http://localhost:5173, proxies /ws and the HTTP endpoints to BLOB_BACKEND (default http://localhost:8000)
+npm run dev          # http://localhost:5173, proxies /ws, /auth and the HTTP endpoints to BLOB_BACKEND (default http://localhost:8000); run that backend with AUTH_DISABLED=1 (or PUBLIC_URL=http://localhost:5173 to sign in for real)
 npm run lint && npm run typecheck && npm test && npm run build   # build after the backend is merged: the page version comes from backend/blob/__init__.py
 ```
 
-Install a browser once with its token: open `https://<host>/#t=<DEVICE_TOKEN>&device=<name>`. The page stores both in `localStorage` and removes them from the address bar. Tap the blob to talk, tap again to send; tap while it thinks or speaks to cancel; long press opens diagnostics; tap an alert to hear it and clear it. On every device (wake is on by default; set `"wake": false` in `config/devices.json` to turn it off for one) the page also loads the wake-word and voice-activity models from `/models/` and listens for the phrase in `web/public/models/wake.json` ("hey blob", a model trained for this project; see `docs/wake-word-training.md`).
+Open `https://<host>/` and sign in with Pocket ID once; the session cookie keeps the browser signed in. Tap the blob to talk, tap again to send; tap while it thinks or speaks to cancel; long press opens diagnostics; tap an alert to hear it and clear it. When the signed-in user is in the wake group, the page also loads the wake-word and voice-activity models from `/models/` and listens for the phrase in `web/public/models/wake.json` ("hey blob", a model trained for this project; see `docs/wake-word-training.md`).
 
 End-to-end tests (Chromium headless, fake microphone, software GL):
 
 ```sh
 npx playwright install chromium
 npm run e2e                                  # against the mock backend (web/e2e/mock-backend.ts)
-BLOB_URL=http://localhost:8000 BLOB_TOKEN=<DEVICE_TOKEN> BLOB_ALERT_TOKEN=<ALERT_TOKEN> npx playwright test   # against a running backend (mock-only specs are skipped)
+BLOB_URL=http://localhost:8000 BLOB_SESSION=<blob_session cookie> BLOB_ALERT_TOKEN=<ALERT_TOKEN> npx playwright test   # against a running backend (mock-only specs are skipped)
 npm run screenshots                          # rewrites docs/screenshots/ and the PWA icons
 ```
 
-For the real-backend run, `config/devices.json` needs the devices `hf-wake`, `hf-vad`, `hf-quiet` (`wake: true`) and `e2e-sound` (`sound: true`). Screenshots of every state and of alerts are in `docs/screenshots/`; the look and its limits are in `docs/notes/look.md`.
+For the real-backend run, `BLOB_SESSION` must belong to a user in both groups (the hands-free and chime specs need `wake` and `sound`). The mock backend fakes sign-in: the cookie value is the device name. Screenshots of every state and of alerts are in `docs/screenshots/`; the look and its limits are in `docs/notes/look.md`.
 
 ## CI
 

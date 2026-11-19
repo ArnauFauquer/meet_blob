@@ -6,7 +6,16 @@ from pydantic import ValidationError
 from blob.config import Settings
 from tests.conftest import make_settings
 
-REQUIRED = ("HERMES_URL", "HERMES_KEY", "HERMES_MODEL", "DEVICE_TOKEN", "ALERT_TOKEN")
+REQUIRED = (
+    "HERMES_URL",
+    "HERMES_KEY",
+    "HERMES_MODEL",
+    "PUBLIC_URL",
+    "OIDC_ISSUER",
+    "OIDC_CLIENT_ID",
+    "ALERT_TOKEN",
+)
+URLS = ("HERMES_URL", "PUBLIC_URL", "OIDC_ISSUER")
 
 
 def test_defaults(tmp_path: Path) -> None:
@@ -26,7 +35,9 @@ def test_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "HERMES_URL": "http://hermes:8642/",
         "HERMES_KEY": "k",
         "HERMES_MODEL": "hermes-agent",
-        "DEVICE_TOKEN": "t",
+        "PUBLIC_URL": "https://blob.example/",
+        "OIDC_ISSUER": "https://id.example/",
+        "OIDC_CLIENT_ID": "blob",
         "ALERT_TOKEN": "a",
         "PORT": "9000",
         "BLOB_FAKE_MODELS": "1",
@@ -39,12 +50,19 @@ def test_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.port == 9000
     assert s.blob_fake_models is True
     assert (s.alert_token, s.timer_rule, s.followup_max) == ("a", False, 5)
+    assert (s.public_url, s.oidc_issuer) == ("https://blob.example", "https://id.example")
+    assert (s.oidc_client_id, s.oidc_client_secret) == ("blob", "")
+    assert (s.oidc_sound_group, s.oidc_wake_group, s.session_idle_days) == (
+        "blob-sound",
+        "blob-wake",
+        30,
+    )
 
 
 @pytest.mark.parametrize("missing", REQUIRED)
 def test_required(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
     for name in REQUIRED:
-        monkeypatch.setenv(name, "http://x" if name == "HERMES_URL" else "v")
+        monkeypatch.setenv(name, "http://x" if name in URLS else "v")
     monkeypatch.delenv(missing)
     with pytest.raises(ValidationError):
         Settings(_env_file=None)  # type: ignore[call-arg]
@@ -60,7 +78,10 @@ def test_required(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
         {"port": 0},
         {"kokoro_device": "tpu"},
         {"quiet_hours": "22-07"},
-        {"device_token": ""},
+        {"oidc_client_id": ""},
+        {"public_url": "blob.test"},
+        {"oidc_issuer": "id.test"},
+        {"session_idle_days": 0},
         {"alert_token": ""},
         {"followup_max": -1},
         {"timer_rule": "maybe"},

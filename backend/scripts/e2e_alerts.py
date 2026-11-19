@@ -1,7 +1,10 @@
 """Scripted page and alert source: the S3/S4 backend flows against a running `uv run blob`.
 
-    uv run python scripts/e2e_alerts.py --token "$DEVICE_TOKEN" --alert-token "$ALERT_TOKEN" \
-        --hermes http://127.0.0.1:18642 [--timer-wav tests/clips/timer_es.wav]
+    uv run python scripts/e2e_alerts.py --session "$BLOB_SESSION" --wake-session "$TABLET_SESSION" \
+        --alert-token "$ALERT_TOKEN" --hermes http://127.0.0.1:18642 [--timer-wav ...]
+
+The sessions are blob_session cookies of signed-in browsers: --session's user is in no group,
+--wake-session's user is in the wake group (OIDC_WAKE_GROUP).
 
 Checks, in order (each prints PASS or FAIL):
  1. POST /alerts creates an alert; every connected page gets a snapshot with it (time printed).
@@ -11,7 +14,7 @@ Checks, in order (each prints PASS or FAIL):
  5. A timer with in_s=2 is pending, then fires: the snapshot changes (delay printed).
  6. A spoken timer request goes through the timer rule: turn_done ok with audio, a new pending
     timer-<unix time> about 60 s ahead, and the fake Hermes counted no request.
- 7. wake from a wake=false device gets bad_message; from the wake=true device it opens a turn.
+ 7. wake from a user outside the wake group gets bad_message; from one inside it opens a turn.
 With BLOB_FAKE_MODELS=1 run the server with BLOB_FAKE_TRANSCRIPT="pon un temporizador de 1
 minuto" and omit --timer-wav (a loud tone is sent). Exit status 0 when every check passes.
 """
@@ -67,18 +70,18 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--url", default="ws://127.0.0.1:8000/ws")
     p.add_argument("--http", help="HTTP base URL (default: derived from --url)")
-    p.add_argument("--token", required=True, help="DEVICE_TOKEN")
+    p.add_argument("--session", required=True, help="blob_session of a user in no group")
+    p.add_argument("--wake-session", required=True, help="blob_session of a wake group user")
     p.add_argument("--alert-token", required=True, help="ALERT_TOKEN")
     p.add_argument("--hermes", required=True, help="fake Hermes base URL (for /requests)")
     p.add_argument("--timer-wav", help="spoken timer request; default: a loud tone (fake models)")
-    p.add_argument("--wake-device", default="tablet", help="a device with wake=true")
     a = p.parse_args()
     http = a.http or a.url.replace("ws://", "http://").replace("wss://", "https://")[: -len("/ws")]
     api = httpx.Client(base_url=http, headers={"Authorization": f"Bearer {a.alert_token}"})
     t0 = time.monotonic()
     with ExitStack() as stack:
-        page = open_session(stack, a.url, a.token, "desktop", t0)
-        mirror = open_session(stack, a.url, a.token, "e2e-mirror", t0)
+        page = open_session(stack, a.url, a.session, t0)
+        mirror = open_session(stack, a.url, a.session, t0)
         alerts_flow(api, page, mirror)
         timer_flow(api, page)
         voice_timer_flow(api, page, a)
@@ -216,11 +219,14 @@ def voice_timer_flow(api: httpx.Client, page: ClientConnection, a: argparse.Name
 
 
 def wake_flow(stack: ExitStack, a: argparse.Namespace, t0: float) -> None:
-    desk = open_session(stack, a.url, a.token, "desktop", t0)
+    desk = open_session(stack, a.url, a.session, t0)
     desk.send(json.dumps({"type": "wake"}))
     err = wait_for(desk, lambda m: isinstance(m, dict) and m["type"] == "error", 5)
-    check("wake from desktop -> bad_message", err == {"type": "error", "code": "bad_message"})
-    tab = open_session(stack, a.url, a.token, a.wake_device, t0)
+    check(
+        "wake outside the wake group -> bad_message",
+        err == {"type": "error", "code": "bad_message"},
+    )
+    tab = open_session(stack, a.url, a.wake_session, t0)
     tab.send(json.dumps({"type": "wake"}))
     st = wait_for(
         tab,
@@ -228,7 +234,7 @@ def wake_flow(stack: ExitStack, a: argparse.Namespace, t0: float) -> None:
         5,
     )
     ok = st is not None and st.get("conv") == "listening"
-    check(f"wake from {a.wake_device} -> listening", ok, f"{st}")
+    check("wake in the wake group -> listening", ok, f"{st}")
     if ok:
         tab.send(json.dumps({"type": "cancel", "turn": st["turn"]}))
         wait_for(tab, lambda m: isinstance(m, dict) and m["type"] == "turn_done", 5)

@@ -9,6 +9,7 @@ dependencies = [
     "httpx",
     "pydantic",
     "pydantic-settings",
+    "pyjwt[crypto]",  # verifies the OIDC ID token
     "numpy",
     "faster-whisper",
     "kokoro-onnx",

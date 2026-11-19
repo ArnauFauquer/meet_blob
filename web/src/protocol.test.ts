@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import contract from '../../protocol/messages.json';
 import {
   CLIENT_TYPES,
-  CLOSE_BAD_TOKEN,
+  CLOSE_SIGNED_OUT,
   CLOSE_BEFORE_HELLO,
   CONV_STATES,
   ERROR_CODES,
@@ -18,7 +18,7 @@ import {
 // One sample per message. The object literals are type-checked against the TS
 // types, and their keys are compared with the contract fields below.
 const clientSamples: { [K in ClientMessage['type']]: Extract<ClientMessage, { type: K }> } = {
-  hello: { type: 'hello', version: '1', token: 't', device: 'd' },
+  hello: { type: 'hello', version: '1' },
   tap: { type: 'tap' },
   utterance: { type: 'utterance', turn: 1, format: 'pcm_s16le', rate: 16000, dur_ms: 1, tail_silence_ms: 0 },
   cancel: { type: 'cancel', turn: 1 },
@@ -62,7 +62,7 @@ describe('protocol matches protocol/messages.json', () => {
     expect([...TURN_DONE_REASONS]).toEqual(contract.turn_done_reasons);
     expect([...TIMEOUT_KINDS]).toEqual(contract.timeout_kinds);
     expect([...ERROR_CODES]).toEqual(contract.error_codes);
-    expect(Object.keys(contract.close_codes).map(Number).sort()).toEqual([CLOSE_BEFORE_HELLO, CLOSE_BAD_TOKEN]);
+    expect(Object.keys(contract.close_codes).map(Number).sort()).toEqual([CLOSE_BEFORE_HELLO, CLOSE_SIGNED_OUT]);
   });
 
   it('has the same fields per client message', () => {

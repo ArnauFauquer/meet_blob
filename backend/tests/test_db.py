@@ -7,7 +7,7 @@ from blob.schemas import Timings
 
 async def test_schema_and_insert(tmp_path: Path) -> None:
     db = Db(str(tmp_path / "sub" / "blob.db"))
-    assert db.user_version() == SCHEMA_VERSION == 2
+    assert db.user_version() == SCHEMA_VERSION == 3
     await db.insert_turn(100, "es", "hola", "adiós", "ok", None, Timings(stt_ms=5))
     [row] = db.turns()
     assert row["lang"] == "es" and row["user_text"] == "hola" and row["reason"] == "ok"
@@ -31,20 +31,20 @@ async def test_delete_older(tmp_path: Path) -> None:
 
 
 def test_newer_file_keeps_its_version(tmp_path: Path) -> None:
-    # A file written by a later version (user_version 3, an extra table) still opens.
+    # A file written by a later version (user_version 4, an extra table) still opens.
     path = tmp_path / "blob.db"
     conn = sqlite3.connect(path)
     conn.execute("CREATE TABLE later (x TEXT)")
-    conn.execute("PRAGMA user_version = 3")
+    conn.execute("PRAGMA user_version = 4")
     conn.commit()
     conn.close()
     db = Db(str(path))
-    assert db.user_version() == 3
+    assert db.user_version() == 4
     db.close()
 
 
 async def test_s1_file_opens_with_s4_code(tmp_path: Path) -> None:
-    # An S1 database (turns only, user_version 1) gains the alerts table and version 2.
+    # An S1 database (turns only, user_version 1) gains the newer tables and version 3.
     path = tmp_path / "blob.db"
     conn = sqlite3.connect(path)
     conn.execute(_TURNS)
@@ -56,7 +56,7 @@ async def test_s1_file_opens_with_s4_code(tmp_path: Path) -> None:
     conn.commit()
     conn.close()
     db = Db(str(path))
-    assert db.user_version() == 2
+    assert db.user_version() == 3
     assert [r["user_text"] for r in db.turns()] == ["hola"]
     assert db.load_alerts() == []
     row = {

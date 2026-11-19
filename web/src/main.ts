@@ -1,4 +1,5 @@
 import { AlertReader } from './alert-reader';
+import { goSignIn } from './auth';
 import { Capture } from './audio/capture';
 import { CHIME_URL, ChimeRules } from './audio/chime';
 import { Playback } from './audio/playback';
@@ -17,7 +18,6 @@ import { BlobRenderer, type FrameInput } from './render/blob';
 import { CLOCK_AFTER_MS } from './render/tables';
 import { computeView, overlayActive, setsOverlay, timerText, topAlert, turnActive, type View } from './state';
 import { decideTap } from './taps';
-import { loadCredentials, TOKEN_KEY } from './token';
 import { TurnClient, type TurnDeps } from './turn-client';
 import { VadController } from './vad';
 import type { Detector, WakeConfig } from './wake/detector';
@@ -30,7 +30,6 @@ import { BlobSocket, type SocketStatus } from './ws';
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 
-const creds = loadCredentials();
 const faults = new FaultLine((text) => ($('fault').textContent = text));
 const ctx = new AudioContext();
 const playback = new Playback(ctx);
@@ -262,20 +261,14 @@ async function reloadIfRebuilt(): Promise<void> {
   }
 }
 
-let askedToken = false;
-function askToken(): void {
-  if (askedToken) return;
-  askedToken = true;
-  const t = window.prompt('Blob: paste the device token')?.trim();
-  if (!t) return;
-  localStorage.setItem(TOKEN_KEY, t);
-  location.reload();
+// Signed out (no session cookie, or it expired): off to Pocket ID, back here afterwards.
+function signedOut(): void {
+  faults.set('signed_out', true);
+  goSignIn();
 }
 
 const sock = new BlobSocket({
   url: wsUrl(),
-  token: creds.token,
-  device: creds.device,
   version: PAGE_VERSION,
   onHelloOk(m) {
     const action = checkVersion(m.version, PAGE_VERSION);
@@ -288,9 +281,7 @@ const sock = new BlobSocket({
     if (s === 'open' && everOpen) void reloadIfRebuilt();
     everOpen ||= s === 'open';
     faults.set('socket_down', s === 'down' || (s === 'connecting' && everOpen));
-    faults.set('bad_token', s === 'bad_token');
-    // Opened without the install link: let the user paste the token instead of a dead end.
-    if (s === 'bad_token') setTimeout(askToken, 0);
+    if (s === 'signed_out') signedOut();
     if (s !== 'open') {
       // The backend cancels the turn when the socket closes.
       reader.reset();
@@ -440,7 +431,7 @@ try {
 
 const diag = new Diag($('diag'), () => ({
   version: PAGE_VERSION,
-  device: creds.device,
+  device: deviceConfig.device || 'unknown',
   socket: socketStatus,
   mic: capture.status,
   audio: ctx.state,
@@ -459,7 +450,8 @@ const diag = new Diag($('diag'), () => ({
 
 onPress(document.body, onTap, () => diag.show());
 keepAwake();
-void fetchDeviceConfig(creds.token, creds.device).then((c) => {
+void fetchDeviceConfig().then((c) => {
+  if (c === 'signed_out') return signedOut();
   deviceConfig = c;
   configLoaded = true;
   capture.silenceRms = c.silence_rms;

@@ -1,5 +1,5 @@
 // S3: no-speech limits with a silent fake microphone on hands-free devices.
-// Against a real backend: hf-quiet needs wake=true in config/devices.json; the
+// Against a real backend: BLOB_SESSION must belong to a user in the wake group; the
 // follow-up flow needs the mock (its reply carries followup=true) and is mock-only.
 import { expect, test } from '@playwright/test';
 import { micArgs } from './mics';

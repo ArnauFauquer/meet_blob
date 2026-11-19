@@ -4,7 +4,6 @@ import json
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -15,20 +14,15 @@ from starlette.websockets import WebSocketDisconnect
 
 from blob import __version__
 from blob.fakes import FakeStt, FakeTts
-from tests.conftest import ALERT_TOKEN, TOKEN, wait_ready
+from tests.conftest import ALERT_TOKEN, signed_in, wait_ready
 from tests.fakes.fake_hermes import FakeHermes
 
 SPEECH = (np.ones(16000, dtype="<i2") * 3000).tobytes()  # 1 s, loud enough for FakeStt
 SILENCE = bytes(32000)
 
 
-def hello(
-    ws: WebSocketTestSession,
-    token: str = TOKEN,
-    version: str = __version__,
-    device: str = "desktop",
-) -> None:
-    ws.send_json({"type": "hello", "version": version, "token": token, "device": device})
+def hello(ws: WebSocketTestSession, version: str = __version__) -> None:
+    ws.send_json({"type": "hello", "version": version})
 
 
 def recv(ws: WebSocketTestSession) -> Any:
@@ -50,8 +44,8 @@ def until(ws: WebSocketTestSession, type_: str) -> list[Any]:
 
 @contextmanager
 def connect(client: TestClient, device: str = "desktop") -> Iterator[WebSocketTestSession]:
-    with client.websocket_connect("/ws") as ws:
-        hello(ws, device=device)
+    with client.websocket_connect("/ws", headers=signed_in(device)) as ws:
+        hello(ws)
         assert recv(ws) == {"type": "hello_ok", "version": __version__, "ok": True}
         assert recv(ws) == {"type": "snapshot", "conv": "idle", "alerts": [], "timers": []}
         yield ws
@@ -161,16 +155,42 @@ def test_message_before_hello_closes_4400(client: TestClient, first: Any) -> Non
         assert e.value.code == 4400
 
 
-def test_bad_token_closes_4401(client: TestClient) -> None:
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"Cookie": "blob_session=wrong"},
+        {**signed_in(), "Origin": "https://evil.test"},  # cross-site page riding the cookie
+    ],
+)
+def test_signed_out_closes_4401(client: TestClient, headers: dict[str, str]) -> None:
+    with client.websocket_connect("/ws", headers=headers) as ws:
+        hello(ws)
+        with pytest.raises(WebSocketDisconnect) as e:
+            recv(ws)
+        assert e.value.code == 4401
+
+
+def test_signed_in_with_own_origin(client: TestClient) -> None:
+    with client.websocket_connect(
+        "/ws", headers={**signed_in(), "Origin": "http://blob.test"}
+    ) as ws:
+        hello(ws)
+        assert recv(ws)["type"] == "hello_ok"
+
+
+def test_signed_out_old_page_gets_hello_ok_to_reload(client: TestClient) -> None:
+    """A page from before sign-in sends hello with a token: it is told to reload, then closed."""
     with client.websocket_connect("/ws") as ws:
-        hello(ws, token="wrong")
+        ws.send_json({"type": "hello", "version": "1", "token": "t", "device": "tablet"})
+        assert recv(ws) == {"type": "hello_ok", "version": __version__, "ok": False}
         with pytest.raises(WebSocketDisconnect) as e:
             recv(ws)
         assert e.value.code == 4401
 
 
 def test_version_mismatch(client: TestClient) -> None:
-    with client.websocket_connect("/ws") as ws:
+    with client.websocket_connect("/ws", headers=signed_in()) as ws:
         hello(ws, version="0")
         assert recv(ws) == {"type": "hello_ok", "version": __version__, "ok": False}
 
@@ -293,10 +313,8 @@ def test_not_ready(app_factory: Any) -> None:
 
 
 @pytest.fixture
-def wake_client(app_factory: Any, tmp_path: Path) -> Iterator[TestClient]:
-    (tmp_path / "devices.json").write_text(
-        json.dumps({"tablet": {"sound": True, "wake": True}, "desktop": {"wake": False}})
-    )
+def wake_client(app_factory: Any) -> Iterator[TestClient]:
+    """tablet is in the wake group, desktop is not (conftest.USERS)."""
     with TestClient(app_factory()) as c:
         wait_ready(c)
         yield c
@@ -372,7 +390,7 @@ def test_alert_broadcast_to_every_client(client: TestClient) -> None:
 def test_snapshot_on_connect_lists_active_only(client: TestClient) -> None:
     post_alert(client, key="on", source="s", text="t")
     post_alert(client, key="later", source="timer", text="t", in_s=3600)
-    with client.websocket_connect("/ws") as ws:
+    with client.websocket_connect("/ws", headers=signed_in()) as ws:
         hello(ws)
         recv(ws)
         assert [a["key"] for a in recv(ws)["alerts"]] == ["on"]
@@ -425,7 +443,7 @@ def test_alert_read_uses_voice_for_lang(app_factory: Any) -> None:
 
 @contextmanager
 def connect_with_alerts(client: TestClient) -> Iterator[WebSocketTestSession]:
-    with client.websocket_connect("/ws") as ws:
+    with client.websocket_connect("/ws", headers=signed_in()) as ws:
         hello(ws)
         assert recv(ws)["type"] == "hello_ok"
         assert recv(ws)["type"] == "snapshot"

@@ -1,46 +1,27 @@
-import json
-from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 
-from blob.devices import load_devices
-from tests.conftest import TOKEN
-
-AUTH = {"Authorization": f"Bearer {TOKEN}"}
-EXAMPLE = Path(__file__).resolve().parents[2] / "config" / "devices.example.json"
+from blob.auth import User
+from blob.devices import device_for
+from tests.conftest import make_settings, signed_in
 
 
-def test_example_file_loads() -> None:
-    devices = load_devices(str(EXAMPLE))
-    assert devices["tablet"].sound and devices["tablet"].wake
-    assert not devices["desktop"].sound and not devices["desktop"].wake
+def test_flags_come_from_groups(tmp_path: Any) -> None:
+    s = make_settings(tmp_path)
+    kiosk = device_for(User("1", "tablet", ("blob-sound", "blob-wake", "family")), s)
+    assert (kiosk.name, kiosk.sound, kiosk.wake) == ("tablet", True, True)
+    person = device_for(User("2", "arnau", ("family",)), s)
+    assert (person.sound, person.wake) == (False, False)
+    custom = make_settings(tmp_path, oidc_sound_group="chimes", oidc_wake_group="hands-free")
+    assert device_for(User("3", "x", ("hands-free",)), custom).wake
+    assert not device_for(User("3", "x", ("blob-wake",)), custom).wake
 
 
-def test_missing_file_means_no_devices(tmp_path: Path) -> None:
-    assert load_devices(str(tmp_path / "none.json")) == {}
-
-
-@pytest.mark.parametrize("content", ["{not json", '{"tablet": {"sound": "loud"}}', "[]"])
-def test_malformed_file(tmp_path: Path, content: str) -> None:
-    p = tmp_path / "devices.json"
-    p.write_text(content)
-    with pytest.raises(ValueError, match="malformed devices file"):
-        load_devices(str(p))
-
-
-def test_malformed_file_stops_startup(tmp_path: Path, app_factory: Any) -> None:
-    (tmp_path / "devices.json").write_text("{")
-    with pytest.raises(ValueError):
-        app_factory()
-
-
-def test_device_config(tmp_path: Path, app_factory: Any) -> None:
-    (tmp_path / "devices.json").write_text(json.dumps({"tablet": {"sound": True, "wake": True}}))
+def test_device_config(app_factory: Any) -> None:
     with TestClient(app_factory(quiet_hours="22:00-07:00")) as c:
-        tablet = c.get("/device-config?device=tablet", headers=AUTH).json()
-        other = c.get("/device-config?device=kitchen", headers=AUTH).json()
+        tablet = c.get("/device-config", headers=signed_in("tablet")).json()
+        desktop = c.get("/device-config", headers=signed_in("desktop")).json()
     assert tablet == {
         "device": "tablet",
         "sound": True,
@@ -51,4 +32,4 @@ def test_device_config(tmp_path: Path, app_factory: Any) -> None:
         "silence_rms": 0.01,
         "debug_audio": False,
     }
-    assert (other["sound"], other["wake"]) == (False, True)
+    assert (desktop["device"], desktop["sound"], desktop["wake"]) == ("desktop", False, False)

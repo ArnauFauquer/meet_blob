@@ -8,6 +8,7 @@ export const OVERLAY_MIN_MS = 3_000;
 export const LONG_PRESS_MS = 600;
 
 export interface DeviceConfig {
+  device: string; // the signed-in user's name
   sound: boolean;
   wake: boolean;
   quiet_hours: string;
@@ -17,8 +18,8 @@ export interface DeviceConfig {
   debug_audio: boolean; // DEBUG_AUDIO_DIR is set on the backend: wake_clip audio is kept
 }
 
-export const DEFAULT_DEVICE = 'desktop';
 export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
+  device: '',
   sound: false,
   wake: false,
   quiet_hours: '',
@@ -32,12 +33,12 @@ export function wsUrl(loc: Pick<Location, 'protocol' | 'host'> = location): stri
   return `${loc.protocol === 'https:' ? 'wss' : 'ws'}://${loc.host}/ws`;
 }
 
-// Missing or failed config falls back to the defaults (sound and wake off).
-export async function fetchDeviceConfig(token: string, device: string): Promise<DeviceConfig> {
+// 401 means signed out (the session cookie is missing or expired). Any other failure falls
+// back to the defaults (sound and wake off).
+export async function fetchDeviceConfig(): Promise<DeviceConfig | 'signed_out'> {
   try {
-    const r = await fetch(`/device-config?device=${encodeURIComponent(device)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const r = await fetch('/device-config', { credentials: 'same-origin', cache: 'no-store' });
+    if (r.status === 401) return 'signed_out';
     if (!r.ok) return DEFAULT_DEVICE_CONFIG;
     return { ...DEFAULT_DEVICE_CONFIG, ...((await r.json()) as Partial<DeviceConfig>) };
   } catch {

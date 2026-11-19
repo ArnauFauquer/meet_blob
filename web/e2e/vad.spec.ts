@@ -1,6 +1,6 @@
 // S3: the voice-activity detector ends a tap turn after silence on a hands-free
 // device (fake mic: synthetic Kokoro question, then 4 s of silence, looped).
-// Against a real backend the device hf-vad needs wake=true in config/devices.json.
+// Against a real backend BLOB_SESSION must belong to a user in the wake group.
 import { expect, test } from '@playwright/test';
 import { micArgs } from './mics';
 import { dbg, openBlob, recv, sent, tap, waitFor, waitView } from './helpers';

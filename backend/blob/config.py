@@ -1,9 +1,9 @@
 """Settings read from the environment (and an optional .env file) and validated at startup."""
 
 import re
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -42,9 +42,19 @@ class Settings(BaseSettings):
     db_path: str = "/data/blob.db"
     static_dir: str = "web/dist"
 
-    # S2: devices and tokens
-    devices_path: str = "config/devices.json"
-    device_token: str = Field(min_length=1)
+    # Sign-in: browsers sign in with OpenID Connect (Pocket ID). PUBLIC_URL is the address the
+    # browser uses; the redirect URI registered at the provider is PUBLIC_URL/auth/callback.
+    # Required unless AUTH_DISABLED is on.
+    public_url: str = ""
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""  # empty: public client (PKCE only)
+    # Group names in the ID token's "groups" claim that turn a signed-in browser's flags on.
+    oidc_sound_group: str = "blob-sound"
+    oidc_wake_group: str = "blob-wake"
+    # A session ends after this many days without use (each page load or connection renews it).
+    session_idle_days: int = Field(30, ge=1)
+    # Machine sources (Hermes, Home Assistant) send this to /alerts as Authorization: Bearer.
     alert_token: str = Field(min_length=1)
 
     # S3: follow-up chain guard (server); the listening limits are served to the page.
@@ -75,6 +85,31 @@ class Settings(BaseSettings):
         if not v.startswith(("http://", "https://")):
             raise ValueError("HERMES_URL and HERMES_ALERTS_URL must start with http:// or https://")
         return v.rstrip("/")
+
+    # Local development only: no sign-in, every browser and script is the user "dev", in the sound
+    # and wake groups. Never on a reachable deployment: anyone on the network gets in.
+    auth_disabled: bool = False
+
+    @field_validator("public_url", "oidc_issuer")
+    @classmethod
+    def _url(cls, v: str) -> str:
+        if v and not v.startswith(("http://", "https://")):
+            raise ValueError("PUBLIC_URL and OIDC_ISSUER must start with http:// or https://")
+        return v.rstrip("/")
+
+    @model_validator(mode="after")
+    def _sign_in(self) -> Self:
+        if not self.auth_disabled:
+            missing = [
+                name.upper()
+                for name in ("public_url", "oidc_issuer", "oidc_client_id")
+                if not getattr(self, name)
+            ]
+            if missing:
+                raise ValueError(
+                    f"{', '.join(missing)} required (or AUTH_DISABLED=1 for local dev)"
+                )
+        return self
 
     @field_validator("quiet_hours")
     @classmethod

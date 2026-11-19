@@ -16,7 +16,7 @@ function pageVersion(): string {
 }
 
 const backend = process.env.BLOB_BACKEND ?? 'http://localhost:8000';
-const proxied = ['/device-config', '/healthz', '/readyz', '/alerts'];
+const proxied = ['/device-config', '/healthz', '/readyz', '/alerts', '/auth'];
 
 export default defineConfig({
   define: { __BLOB_VERSION__: JSON.stringify(pageVersion()) },

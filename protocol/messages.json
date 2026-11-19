@@ -1,9 +1,9 @@
 {
   "$comment": "Contract between backend and page. Source of truth: docs/designs/blob_design.md, section 'WebSocket protocol'. Every JSON message is an object with a string field 'type'. A message marked binary is followed, on the same socket, by exactly one WebSocket binary frame (the hub writes both under a lock, so nothing else comes between them).",
-  "version": 1,
+  "version": 2,
   "close_codes": {
     "4400": "message before hello",
-    "4401": "bad token (client must not retry)"
+    "4401": "no valid session cookie on the upgrade, or a foreign Origin (client must not retry; the page sends the browser to /auth/login). A page with another version gets hello_ok{ok:false} first so it reloads"
   },
   "conv_states": [
     "idle",
@@ -47,9 +47,7 @@
     "hello": {
       "slice": "S1",
       "fields": {
-        "version": "str",
-        "token": "str",
-        "device": "str"
+        "version": "str"
       }
     },
     "tap": {
@@ -167,10 +165,13 @@
     }
   },
   "http": {
-    "GET /device-config?device=<name>": {
-      "auth": "Authorization: Bearer <DEVICE_TOKEN>, 401 otherwise",
-      "response": "{device, sound, wake, quiet_hours, followup_listen_s, listen_no_speech_s, silence_rms, debug_audio}"
+    "GET /device-config": {
+      "auth": "session cookie blob_session (set by /auth/callback), 401 otherwise",
+      "response": "{device, sound, wake, quiet_hours, followup_listen_s, listen_no_speech_s, silence_rms, debug_audio}; device is the user's name, sound and wake come from the user's Pocket ID groups (OIDC_SOUND_GROUP, OIDC_WAKE_GROUP)"
     },
+    "GET /auth/login?next=<path>": "302 to the OIDC provider (authorization code + PKCE); 502 when the provider is unreachable",
+    "GET /auth/callback": "303 to next with the session cookie set; 400 expired or foreign state, 403 refused by the provider, 502 token checks failed",
+    "POST /auth/logout": "204; deletes the session and clears the cookie",
     "GET /healthz": "always 200, body {alive, ready, hermes_reachable}",
     "GET /readyz": "503 until models loaded, then 200",
     "POST /alerts": {

@@ -1,11 +1,15 @@
 """Scripted page: one turn over a real WebSocket, printing every message until turn_done.
 
-    uv run python scripts/e2e_turn.py --wav tests/clips/es.wav --token "$DEVICE_TOKEN" --expect ok
+    uv run python scripts/e2e_turn.py --wav tests/clips/es.wav --session "$BLOB_SESSION" --expect ok
+
+--session is the blob_session cookie of a browser signed in to that Blob (copy it from the
+browser's developer tools: Application > Cookies).
 
 Options: --empty sends a zero-length utterance; --cancel-after S cancels S seconds after the
 utterance; --busy-check taps from a second connection while the turn is open and expects
 error busy; --expect-error CODE expects the tap itself to get that error (for not_ready).
-S3: --wake sends wake instead of tap (--followup sets wake.followup; use --device tablet);
+S3: --wake sends wake instead of tap (--followup sets wake.followup; the session's user must be
+in the wake group);
 --expect-followup true|false checks the tts followup flag.
 Exit status 0 when every expectation holds.
 """
@@ -38,11 +42,11 @@ def recv(ws: ClientConnection, t0: float) -> Any:
     return msg
 
 
-def open_session(
-    stack: ExitStack, url: str, token: str, device: str, t0: float
-) -> ClientConnection:
-    ws = stack.enter_context(connect(url, max_size=None))
-    ws.send(json.dumps({"type": "hello", "version": __version__, "token": token, "device": device}))
+def open_session(stack: ExitStack, url: str, session: str, t0: float) -> ClientConnection:
+    """A signed-in connection: the session cookie rides on the upgrade (no Origin header)."""
+    cookie = {"Cookie": f"blob_session={session}"}
+    ws = stack.enter_context(connect(url, max_size=None, additional_headers=cookie))
+    ws.send(json.dumps({"type": "hello", "version": __version__}))
     hello_ok = recv(ws, t0)
     assert hello_ok["type"] == "hello_ok", hello_ok
     assert recv(ws, t0)["type"] == "snapshot"
@@ -62,8 +66,7 @@ def main() -> int:
 def turn(stack: ExitStack) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--url", default="ws://127.0.0.1:8000/ws")
-    p.add_argument("--token", required=True)
-    p.add_argument("--device", default="desktop")
+    p.add_argument("--session", required=True, help="blob_session cookie of a signed-in browser")
     p.add_argument("--wav", help="16-bit WAV to send (any rate; resampled to 16 kHz)")
     p.add_argument("--empty", action="store_true", help="send dur_ms 0 and no audio")
     p.add_argument("--tail-silence-ms", type=int, default=500)
@@ -79,7 +82,7 @@ def turn(stack: ExitStack) -> int:
     failures: list[str] = []
     t0 = time.monotonic()
 
-    ws = open_session(stack, a.url, a.token, a.device, t0)
+    ws = open_session(stack, a.url, a.session, t0)
     start = {"type": "wake", "followup": a.followup} if a.wake else {"type": "tap"}
     ws.send(json.dumps(start))
     if a.expect_error:
@@ -97,7 +100,7 @@ def turn(stack: ExitStack) -> int:
             break
 
     if a.busy_check:
-        other = open_session(stack, a.url, a.token, "e2e-second", t0)
+        other = open_session(stack, a.url, a.session, t0)
         other.send(json.dumps({"type": "tap"}))
         msg = recv(other, t0)
         if msg != {"type": "error", "code": "busy"}:

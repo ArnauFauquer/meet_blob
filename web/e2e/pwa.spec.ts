@@ -9,12 +9,11 @@ test('production build loads without console errors', async ({ page }) => {
   await waitView(page, 'idle');
   await page.waitForTimeout(1500);
   expect(errors).toEqual([]);
-  expect(page.url()).not.toContain('#t='); // the token left the address bar
   expect(await page.evaluate(() => navigator.serviceWorker.getRegistrations().then((r) => r.length))).toBe(0);
 });
 
 test('manifest is valid and the icons exist', async ({ page, request }) => {
-  await page.goto('/');
+  await openBlob(page, 'e2e-manifest'); // signed out, the page would leave for /auth/login
   const href = await page.locator('link[rel=manifest]').getAttribute('href');
   const res = await request.get(href!);
   expect(res.ok()).toBe(true);

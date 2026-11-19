@@ -16,13 +16,13 @@ describe('FaultLine', () => {
     expect(f.text).toBe('');
     expect(seen).toEqual([FAULTS.audio_locked, FAULTS.socket_down, FAULTS.audio_locked, '']);
   });
-  it('orders bad token and version above a dropped socket', () => {
+  it('orders signed out and version above a dropped socket', () => {
     const f = new FaultLine(() => {});
     f.set('socket_down', true);
     f.set('mic_denied', true);
     f.set('version', true);
     expect(f.current).toBe('version');
-    f.set('bad_token', true);
-    expect(f.current).toBe('bad_token');
+    f.set('signed_out', true);
+    expect(f.current).toBe('signed_out');
   });
 });

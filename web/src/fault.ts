@@ -2,7 +2,7 @@
 // Hermes down is not shown here (diagnostics view only).
 
 export const FAULTS = {
-  bad_token: 'Wrong or missing token. Open the install link again.',
+  signed_out: 'Signed out. Reload the page to sign in.',
   version: 'Page and server versions differ. Reload did not help.',
   socket_down: 'Offline. Reconnecting…',
   mic_denied: 'Microphone blocked.',

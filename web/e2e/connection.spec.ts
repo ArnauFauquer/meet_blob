@@ -1,21 +1,26 @@
 import { expect, test } from '@playwright/test';
-import { TOKEN, dbg, log, mockOnly, openBlob, recv, sent, waitFor, waitView } from './helpers';
+import { dbg, log, mockOnly, openBlob, recv, sent, waitFor, waitView } from './helpers';
 
-test('bad token: close 4401, fault shown, no retry', async ({ page }) => {
-  await openBlob(page, 'e2e-badtoken', 'wrong-token');
+test('signed out: the page goes to sign in and asks to come back to the same page', async ({ page }) => {
+  const login = page.waitForRequest((r) => r.url().includes('/auth/login?next=%2F%3Fenroll%3Dpos'));
+  await openBlob(page, 'e2e-signedout', 'invalid', '?enroll=pos');
+  await login;
+});
+
+test('signed out again right after signing in: close 4401, fault shown, no retry, no loop', async ({ page }) => {
+  // As if the browser came back from the provider a moment ago and is still refused.
+  await page.addInitScript(() => sessionStorage.setItem('blob.signinAt', String(Date.now())));
+  const logins: string[] = [];
+  page.on('request', (r) => r.url().includes('/auth/login') && logins.push(r.url()));
+  await openBlob(page, 'e2e-signedout', 'invalid');
   const l = await waitFor(page, (l) => l.some((e) => e.dir === 'close'), 'socket closed');
   expect(l.find((e) => e.dir === 'close')!.code).toBe(4401);
-  await expect.poll(() => dbg(page, 'fault')).toBe('bad_token');
-  await expect(page.locator('#fault')).toContainText('token');
+  await expect.poll(() => dbg(page, 'fault')).toBe('signed_out');
+  await expect(page.locator('#fault')).toContainText('Signed out');
   await page.waitForTimeout(4000); // longer than the first two backoff steps
   expect((await log(page)).filter((e) => e.dir === 'connect')).toHaveLength(1);
   expect(await dbg(page, 'view')).toBe('offline');
-});
-
-test('bad token: prompt for the token, store it, reload into idle', async ({ page }) => {
-  page.once('dialog', (d) => d.accept(TOKEN));
-  await openBlob(page, 'e2e-prompt', 'wrong-token');
-  await waitView(page, 'idle');
+  expect(logins).toEqual([]);
 });
 
 test('reconnects after the socket drops', async ({ page }) => {

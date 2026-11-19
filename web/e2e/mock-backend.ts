@@ -1,7 +1,9 @@
 // Mock Blob backend for the page e2e tests: serves web/dist and implements the
 // WebSocket contract of protocol/messages.json with a real turn lock shared by
-// all connections. The device name picks a scenario for flows a real backend
-// cannot be told to produce:
+// all connections. Sign-in is faked: the blob_session cookie value is the
+// device name (no cookie, or "invalid", is signed out: /device-config 401,
+// WebSocket close 4401; GET /auth/login answers a "mock sign-in" page). The
+// device name picks a scenario for flows a real backend cannot be told to produce:
 //   empty, hermes_fail, tts_fail, not_ready, version (hello_ok with another
 //   version), slow (5 s thinking, 8 s reply), drop (the first socket is killed after hello_ok).
 // Any other name is a normal turn. Device flags (GET /device-config): a name
@@ -10,7 +12,7 @@
 // a follow-up. A name containing "debug" gets debug_audio=true (wake_clip frames
 // are logged as mock_wake_clip and dropped). Alerts (S4): POST/GET/DELETE /alerts with MOCK_ALERT_TOKEN; an
 // alert_read of a key starting with "ttsfail" answers error{bad_message} (synthesis failure).
-// Run: node e2e/mock-backend.ts (PORT, MOCK_TOKEN, MOCK_ALERT_TOKEN, MOCK_STATIC).
+// Run: node e2e/mock-backend.ts (PORT, MOCK_ALERT_TOKEN, MOCK_STATIC).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
@@ -19,7 +21,6 @@ import { WebSocketServer, type WebSocket, type RawData } from 'ws';
 import { speechLike, wav } from './wav.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
-const TOKEN = process.env.MOCK_TOKEN ?? 'test-token';
 const ALERT_TOKEN = process.env.MOCK_ALERT_TOKEN ?? 'alert-token';
 const STATIC = process.env.MOCK_STATIC ?? fileURLToPath(new URL('../dist', import.meta.url));
 const MAX_FRAME = 1 << 20;
@@ -48,8 +49,16 @@ const activeAlerts = () =>
     .sort((a, b) => a.activated_at - b.activated_at || (a.key < b.key ? -1 : 1))
     .map(({ key, source, urgency, text, lang, late, activated_at }) => ({ key, source, urgency, text, lang, late, activated_at }));
 
+// The device name from the fake session cookie, or null when signed out.
+function sessionDevice(req: IncomingMessage): string | null {
+  const m = /(?:^|;\s*)blob_session=([^;]*)/.exec(req.headers.cookie ?? '');
+  const device = m ? decodeURIComponent(m[1]) : '';
+  return device && device !== 'invalid' ? device : null;
+}
+
 interface Conn {
   ws: WebSocket;
+  session: string | null;
   hello: boolean;
   device: string;
   pendingUtterance: { turn: number; dur_ms: number } | null;
@@ -163,9 +172,9 @@ function onMessage(c: Conn, data: RawData, isBinary: boolean) {
   }
   if (!c.hello) {
     if (m.type !== 'hello') return c.ws.close(4400, 'message before hello');
-    if (m.token !== TOKEN) return c.ws.close(4401, 'bad token');
+    if (c.session === null) return c.ws.close(4401, 'signed out');
     c.hello = true;
-    c.device = String(m.device ?? '');
+    c.device = c.session;
     send(c, { type: 'hello_ok', version: c.device === 'version' ? 'mock-other-version' : m.version, ok: true });
     send(c, { type: 'snapshot', conv, alerts: activeAlerts() });
     if (c.device === 'drop' && !dropped.has(c.device)) {
@@ -238,9 +247,14 @@ async function serve(req: IncomingMessage, res: ServerResponse) {
     res.setHeader('content-type', 'application/json');
     return res.end(JSON.stringify({ alive: true, ready: true, hermes_reachable: true }));
   }
+  if (url.pathname === '/auth/login') {
+    console.log(JSON.stringify({ kind: 'mock_login', next: url.searchParams.get('next') }));
+    res.setHeader('content-type', 'text/html; charset=utf-8');
+    return res.end('<!doctype html><title>mock sign-in</title><p>mock sign-in</p>');
+  }
   if (url.pathname === '/device-config') {
-    if (req.headers.authorization !== `Bearer ${TOKEN}`) return res.writeHead(401).end();
-    const device = url.searchParams.get('device') ?? '';
+    const device = sessionDevice(req);
+    if (device === null) return res.writeHead(401).end();
     res.setHeader('content-type', 'application/json');
     return res.end(
       JSON.stringify({
@@ -318,8 +332,8 @@ async function alertsApi(req: IncomingMessage, res: ServerResponse, url: URL) {
 
 const server = createServer((req, res) => void serve(req, res));
 const wss = new WebSocketServer({ server, path: '/ws' });
-wss.on('connection', (ws) => {
-  const c: Conn = { ws, hello: false, device: '', pendingUtterance: null, pendingClip: null };
+wss.on('connection', (ws, req) => {
+  const c: Conn = { ws, session: sessionDevice(req), hello: false, device: '', pendingUtterance: null, pendingClip: null };
   conns.add(c);
   ws.on('message', (d, isBinary) => onMessage(c, d, isBinary));
   ws.on('close', () => {

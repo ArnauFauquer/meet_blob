@@ -1,7 +1,9 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-export const TOKEN = process.env.BLOB_TOKEN ?? 'test-token';
 export const external = !!process.env.BLOB_URL;
+// Against a real backend: the blob_session cookie of a signed-in browser (the device name is then
+// the session's user, and its flags come from that user's groups). The mock takes the device
+// name as the session.
 
 // Tests whose flow needs the mock's scenarios (picked by device name).
 export function mockOnly(): void {
@@ -55,9 +57,15 @@ function instrument() {
   };
 }
 
-export async function openBlob(page: Page, device: string, token = TOKEN, query = ''): Promise<void> {
+export const SESSION = process.env.BLOB_SESSION;
+
+export async function openBlob(page: Page, device: string, session: string | null = SESSION ?? device, query = ''): Promise<void> {
   await page.addInitScript(instrument);
-  await page.goto(`/${query}#t=${encodeURIComponent(token)}&device=${encodeURIComponent(device)}`);
+  if (session !== null) {
+    const url = new URL(test.info().project.use.baseURL ?? 'http://localhost');
+    await page.context().addCookies([{ name: 'blob_session', value: session, url: url.origin }]);
+  }
+  await page.goto(`/${query}`);
 }
 
 export const log = (page: Page) => page.evaluate(() => (window as unknown as { __log: LogEntry[] }).__log);

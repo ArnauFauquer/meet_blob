@@ -76,9 +76,9 @@ def test_timings_keys() -> None:
 
 
 def test_close_codes() -> None:
-    from blob.hub import CLOSE_BAD_TOKEN, CLOSE_BEFORE_HELLO
+    from blob.hub import CLOSE_BEFORE_HELLO, CLOSE_SIGNED_OUT
 
-    assert {str(CLOSE_BEFORE_HELLO), str(CLOSE_BAD_TOKEN)} == set(PROTOCOL["close_codes"])
+    assert {str(CLOSE_BEFORE_HELLO), str(CLOSE_SIGNED_OUT)} == set(PROTOCOL["close_codes"])
 
 
 def test_client_message_parsing() -> None:

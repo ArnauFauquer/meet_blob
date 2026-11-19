@@ -1,5 +1,5 @@
 import {
-  CLOSE_BAD_TOKEN,
+  CLOSE_SIGNED_OUT,
   SERVER_BINARY_TYPES,
   parseServerMessage,
   type ClientMessage,
@@ -7,7 +7,7 @@ import {
   type ServerMessage,
 } from './protocol';
 
-export type SocketStatus = 'connecting' | 'open' | 'down' | 'bad_token' | 'stopped';
+export type SocketStatus = 'connecting' | 'open' | 'down' | 'signed_out' | 'stopped';
 
 export const PING_MS = 20_000;
 export const PONG_TIMEOUT_MS = 45_000;
@@ -20,8 +20,6 @@ export function backoffMs(attempt: number): number {
 
 export interface SocketOptions {
   url: string;
-  token: string;
-  device: string;
   version: string;
   onMessage(msg: ServerMessage, binary: ArrayBuffer | null): void;
   onStatus(status: SocketStatus): void;
@@ -69,7 +67,7 @@ export class BlobSocket {
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'hello', version: this.opts.version, token: this.opts.token, device: this.opts.device }));
+      ws.send(JSON.stringify({ type: 'hello', version: this.opts.version }));
       this.lastPong = Date.now();
       this.pingTimer = setInterval(() => this.ping(), PING_MS);
     };
@@ -116,9 +114,9 @@ export class BlobSocket {
 
   private closed(code: number): void {
     this.teardown();
-    if (this.status === 'stopped' || this.status === 'bad_token') return;
-    if (code === CLOSE_BAD_TOKEN) {
-      this.setStatus('bad_token');
+    if (this.status === 'stopped' || this.status === 'signed_out') return;
+    if (code === CLOSE_SIGNED_OUT) {
+      this.setStatus('signed_out');
       return;
     }
     this.setStatus('down');
