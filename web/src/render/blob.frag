@@ -8,6 +8,12 @@ precision highp float;
 #ifndef QUALITY
 #define QUALITY 2
 #endif
+// WEATHER (define set by blob.ts): 1 once the idle blob has shown the sky.
+// The weather shape is big and gets inlined at every map() call: software GL
+// stalls the page while it compiles, so pages that never show it skip it.
+#ifndef WEATHER
+#define WEATHER 0
+#endif
 #if QUALITY >= 2
 #define MARCH_STEPS 96
 #define LOBES 5
@@ -39,12 +45,18 @@ uniform float uMix;
 uniform vec4 uEyes;   // eye half width, half height (blink applied), height, happy (0 open, 1 arcs)
 uniform vec2 uGaze;   // where the face looks
 uniform vec3 uMouth;  // curvature (+ smile), opening, face strength
+uniform vec4 uMouthShape; // half width, tilt (one corner up), pucker (0 wide lips, 1 round "o"), tongue
 // Clock (shape 3, the idle blob at rest): HH:MM as lava digits on a wide pill.
 uniform vec4 uDigits;     // the four digits shown
 uniform vec4 uDigitsPrev; // the digits before the last change
 uniform float uTick;      // 0..1, melts uDigitsPrev into uDigits
 uniform vec4 uDigitY;     // vertical bob of each digit (a slow wave across the clock)
 uniform float uColon;     // 0..1, the colon's beat once a second
+// Weather (shape 4, the idle blob showing the sky outside): weights of each
+// part, eased on the CPU so one sky melts into the next.
+uniform vec4 uSky;    // sun, moon, cloud, (unused)
+uniform vec3 uFall;   // drops falling from the cloud: amount, snow (0 rain, 1 flakes), fall time
+uniform vec3 uFaceT;  // where the face sits on the weather shape: offset xy, scale
 // Body motion (animateBody() in blob.ts): the body's offset (hops, acts) and
 // the linear map from world to body: turns and flips, the jelly lean and the
 // squash and stretch, all in one matrix. uBodyK turns a body distance into a
@@ -189,13 +201,97 @@ float clockShape(vec3 p) {
   return (d + ripple(p)) * s;
 }
 
-// Shape ids (SHAPE in tables.ts): 0 sphere, 1 triangle, 2 square, 3 clock.
-float pickShape(float id, float sphere, vec2 alerts, float clock) {
-  return id < 0.5 ? sphere : (id < 1.5 ? alerts.x : (id < 2.5 ? alerts.y : clock));
+float smax(float a, float b, float k) {
+  return -smin(-a, -b, k);
+}
+
+// Weather size: like the clock, larger than the blob and fitted to a narrow screen.
+float weatherScale() {
+  return radius() / uRadius * 0.85 * min(1.0, uRes.x / uRes.y / 0.9);
+}
+
+// The sky outside, in units of the blob radius: a sun with rays that turn and
+// pulse, a crescent moon, a cloud of merged puffs, and drops (or flakes) that
+// drip out of the cloud's belly and fall. Each part grows or melts away with
+// its weight in uSky and uFall, so one sky morphs into the next.
+float weatherShape(vec3 p) {
+#if WEATHER == 0
+  return length(p) - radius();
+#else
+  float s = uRadius * weatherScale();
+  vec3 q = p / s;
+  float cw = uSky.z;
+  // Sun or moon: centred alone, smaller and behind the cloud's top left with one.
+  float orb = max(uSky.x, uSky.y);
+  vec3 o = q - mix(vec3(0.0), vec3(-0.5, 0.42, -0.35), cw);
+  float sr = mix(0.74, 0.5, cw);
+  float d = length(o) - sr * mix(0.2, 1.0, orb) + (1.0 - orb) * 0.6;
+  // Rays: eight capsules in the face plane, each on its own pulse.
+  if (uSky.x > 0.01) {
+    const float SECTOR = 0.7853982;
+    float ang = atan(o.y, o.x) + uFlow * 0.5;
+    float id = floor(ang / SECTOR + 0.5);
+    float a = ang - id * SECTOR;
+    vec2 rp = length(o.xy) * vec2(cos(a), sin(a));
+    float rr = sr * mix(0.3, 1.0, uSky.x); // the rays retract into the orb as the sun goes
+    float len = rr * (0.32 + 0.1 * sin(uFlow * 5.0 + id * 1.9)) * uSky.x;
+    vec3 rq = vec3(rp.x - clamp(rp.x, rr * 0.8, rr * 1.18 + len), rp.y, o.z);
+    d = smin(d, length(rq) - sr * 0.13 * uSky.x, 0.1);
+  }
+  d = lobePush(d, q, vec3(0.6), 0.32); // the orb only: the lobes would fill the moon's bite
+  // Moon: a bite through the orb (a cylinder along the view), up and to the right.
+  if (uSky.y > 0.01) {
+    float bite = length(o.xy - sr * vec2(0.5, 0.3)) - sr * 0.78 + (1.0 - uSky.y) * 0.8;
+    d = smax(d, -bite, 0.08);
+  }
+  // Cloud: four puffs that breathe out of step, a flatter belly.
+  if (cw > 0.01) {
+    float f = uFlow * 2.0;
+    float c = length(q - vec3(0.0, 0.06, 0.0)) - 0.6 - 0.03 * sin(f);
+    c = smin(c, length(q - vec3(-0.62, -0.2, 0.06)) - 0.4 - 0.03 * sin(f + 2.1), 0.2);
+    c = smin(c, length(q - vec3(0.64, -0.16, 0.0)) - 0.44 - 0.03 * sin(f + 4.2), 0.2);
+    c = smin(c, length(q - vec3(0.28, 0.36, -0.12)) - 0.38 - 0.03 * sin(f + 1.0), 0.2);
+    c = smax(c, -(q.y + 0.5), 0.14);
+    d = smin(d, c + (1.0 - cw) * 1.2, 0.12);
+  }
+  // Drops: fall from the belly; each swells as it drips, so it pulls a neck
+  // out of the cloud (smin), and shrinks as it lands. Flakes are rounder,
+  // slower and sway.
+  if (uFall.x > 0.01) {
+    for (int i = 0; i < LOBES; i++) {
+      float fi = float(i);
+      // One speed for all, fixed offsets, so they never line up; each fall
+      // drops from a new spot and with a new size.
+      float cyc = uFall.z + fi * 0.618;
+      float ph = fract(cyc);
+      vec3 rn = vec3(hash(vec3(floor(cyc), fi, 1.0)), hash(vec3(floor(cyc), fi, 2.0)), hash(vec3(floor(cyc), fi, 3.0)));
+      float x = (fi - float(LOBES - 1) * 0.5) * (1.5 / float(LOBES)) + 0.16 * (rn.x - 0.5);
+      x += uFall.y * 0.09 * sin(uFall.z * 9.0 + fi * 2.0);
+      vec3 dq = q - vec3(x, -0.36 - ph * 0.9, 0.24 * (rn.y - 0.5));
+      dq.y *= mix(0.62, 1.0, uFall.y); // raindrops are long
+      float rad = mix(0.08, 0.095, uFall.y) * (0.8 + 0.4 * rn.z) * uFall.x * smoothstep(0.0, 0.18, ph) * (1.0 - smoothstep(0.78, 1.0, ph));
+      d = smin(d, length(dq) - rad, 0.16);
+    }
+  }
+  return (d + ripple(q)) * s;
+#endif
+}
+
+// Shape ids (SHAPE in tables.ts): 0 sphere, 1 triangle, 2 square, 3 clock, 4 weather.
+float pickShape(float id, float sphere, vec2 alerts, float clock, float weather) {
+  return id < 0.5 ? sphere : (id < 1.5 ? alerts.x : (id < 2.5 ? alerts.y : (id < 3.5 ? clock : weather)));
 }
 
 bool isAlert(float id) {
   return id > 0.5 && id < 2.5;
+}
+
+bool isClock(float id) {
+  return id > 2.5 && id < 3.5;
+}
+
+bool isWeather(float id) {
+  return id > 3.5;
 }
 
 // Distance in the body frame: main() marches the ray already moved into it
@@ -206,12 +302,13 @@ float map(vec3 p) {
   // compiled shader stays small: software GL stalls the page while it compiles.
   float sphere = (uShapeA < 0.5 || (morph && uShapeB < 0.5)) ? sphereShape(p) : 0.0;
   vec2 alerts = (isAlert(uShapeA) || (morph && isAlert(uShapeB))) ? alertShapes(p) : vec2(0.0);
-  float clock = (uShapeA > 2.5 || (morph && uShapeB > 2.5)) ? clockShape(p) : 0.0;
-  float a = pickShape(uShapeA, sphere, alerts, clock);
+  float clock = (isClock(uShapeA) || (morph && isClock(uShapeB))) ? clockShape(p) : 0.0;
+  float weather = (isWeather(uShapeA) || (morph && isWeather(uShapeB))) ? weatherShape(p) : 0.0;
+  float a = pickShape(uShapeA, sphere, alerts, clock, weather);
   if (!morph) return a;
   // A mix of two distance fields is not a true distance: scaling it by 0.875
   // turns the usual 0.8 march step into about 0.7 while morphing.
-  return mix(a, pickShape(uShapeB, sphere, alerts, clock), uMix) * 0.875;
+  return mix(a, pickShape(uShapeB, sphere, alerts, clock, weather), uMix) * 0.875;
 }
 
 vec3 normalAt(vec3 p) {
@@ -335,7 +432,8 @@ float lavaDist(vec3 q, float r, float pull) {
 // triangle so it fits inside.
 vec2 faceSpace(vec3 p, float id) {
   if (id < 0.5) return p.xy / radius();
-  if (id > 2.5) return p.xy / (uRadius * clockScale());
+  if (isWeather(id)) return (p.xy / (uRadius * weatherScale()) - uFaceT.xy) / uFaceT.z;
+  if (isClock(id)) return p.xy / (uRadius * clockScale());
   vec2 f = alertFrame(p).xy / uRadius;
   return id < 1.5 ? (f + vec2(0.0, 0.3)) / 0.62 : f / 0.95;
 }
@@ -353,9 +451,39 @@ float sdArc(vec2 q, vec2 sc, float ra, float rb) {
   return ((sc.y * q.x > sc.x * q.y) ? length(q - sc * ra) : abs(length(q) - ra)) - rb;
 }
 
-// Distance to the face strokes: two eyes (ellipses blending into happy arcs)
-// and a mouth (a curve that opens into an ellipse).
-float faceDist(vec2 q) {
+// The mouth: two lips between corners at +-w (uMouthShape.x). The upper lip
+// follows the smile; the lower one drops by the opening, round in the middle,
+// so a closed mouth is one stroke and an open one a "D" that a pucker narrows
+// into an "o". x: distance to the lips' outline, y: the dark inside (0..1),
+// z: the tongue (0..1).
+vec3 mouthDist(vec2 m) {
+  float w = uMouthShape.x;
+  float open = uMouth.y;
+  m.y -= uMouthShape.y * m.x; // tilt: a lopsided grin, a "hmm"
+  float lift = uMouth.x * 0.2 * w * (1.0 - 0.7 * uMouthShape.z); // corner height; a pucker flattens it
+  float xc = clamp(m.x, -w, w);
+  float u = xc / w;
+  float arch = sqrt(max(1.0 - u * u, 0.0));
+  float up = lift * u * u + open * 0.3 * arch * (0.4 + 0.6 * uMouthShape.z);
+  float lo = lift * u * u - open * mix(arch, sqrt(arch), 0.5 - 0.5 * uMouthShape.z);
+  // Signed distances to each lip, corrected by its slope (an approximation, plenty for a glow).
+  float su = (2.0 * lift * u) / w;
+  float sl = su + open * u / (w * max(arch, 0.25));
+  float dUp = (m.y - up) * inversesqrt(1.0 + su * su);
+  float dLo = (lo - m.y) * inversesqrt(1.0 + sl * sl);
+  float inside = max(dUp, dLo);
+  float dx = abs(m.x) - w;
+  float fill = dx > 0.0 ? length(vec2(dx, max(inside, 0.0))) : inside;
+  float cavity = smoothstep(0.012, -0.012, fill);
+  // Tongue: a soft bump resting on the lower lip, inside the cavity only.
+  vec2 tq = (m - vec2(0.0, lo * 0.8 - open * 0.15)) / vec2(w * 0.62, open * 0.55 + 0.001);
+  float tongue = cavity * smoothstep(1.0, 0.7, length(tq)) * uMouthShape.w * smoothstep(0.02, 0.06, open);
+  return vec3(abs(fill) - 0.032, cavity, tongue);
+}
+
+// Distance to the face strokes (x): two eyes (ellipses blending into happy
+// arcs) and the mouth's outline; y, z: the mouth's inside and tongue.
+vec3 faceDist(vec2 q) {
   float d = 1e3;
   for (int i = 0; i < 2; i++) {
     vec2 e = q - vec2(i == 0 ? -0.3 : 0.3, uEyes.z) - uGaze;
@@ -363,12 +491,8 @@ float faceDist(vec2 q) {
     float arc = sdArc(e + vec2(0.0, 0.07), vec2(0.8, 0.6), 0.14, 0.035);
     d = min(d, mix(eye, arc, uEyes.w));
   }
-  vec2 m = q - vec2(0.0, -0.35) - uGaze * 0.5;
-  float xc = clamp(m.x, -0.2, 0.2);
-  float k = uMouth.x;
-  d = min(d, length(vec2(m.x - xc, (m.y - k * xc * xc) / sqrt(1.0 + 4.0 * k * k * xc * xc))) - 0.035);
-  if (uMouth.y > 0.003) d = min(d, sdEllipse(m, vec2(0.08 + uMouth.y * 0.7, uMouth.y)));
-  return d;
+  vec3 mouth = mouthDist(q - vec2(0.0, -0.35) - uGaze * 0.5);
+  return vec3(min(d, mouth.x), mouth.yz);
 }
 
 // Seven-segment digits. SEG: lit segments of 0..9, bit s is segment s.
@@ -422,7 +546,7 @@ void main() {
   col += uColor * min(uGlow, 1.2) * (0.026 * exp(-out_ * 5.0) + 0.0025 * exp(-out_ * 1.8));
 
   // Bounding sphere: rays that miss it skip the march.
-  float rb = (uShapeA > 2.5 || uShapeB > 2.5) ? 1.7 : r * 1.5 + 0.1; // the clock is wider
+  float rb = (uShapeA > 2.5 || uShapeB > 2.5) ? 1.7 : r * 1.5 + 0.1; // the clock and the weather are wider
   rb *= uBodyR;
   float h = b * b - (dot(rc, rc) - rb * rb);
   if (h > 0.0) {
@@ -482,16 +606,21 @@ void main() {
       // white core drawn over the mirror, which goes dark around it. Light on
       // dark, so no reflection or lobe behind can hide the eyes.
       float face = 0.0;
+      float cavity = 0.0;
+      float tongue = 0.0;
       if (uMouth.z > 0.001) {
         vec2 fq = faceSpace(bp, uShapeA);
         if (uMix > 0.001) fq = mix(fq, faceSpace(bp, uShapeB), uMix);
-        float fd = faceDist(fq);
+        vec3 fm = faceDist(fq);
+        float fd = fm.x;
         // The face melts into the digits (and back) with the shape morph.
-        float ck = (uShapeA > 2.5 ? 1.0 - uMix : 0.0) + (uShapeB > 2.5 ? uMix : 0.0);
+        float ck = (isClock(uShapeA) ? 1.0 - uMix : 0.0) + (isClock(uShapeB) ? uMix : 0.0);
         if (ck > 0.001) fd = mix(fd, clockDist(fq), ck);
         float front = uMouth.z * smoothstep(0.0, 0.5, bn.z);
+        cavity = min(front, 1.0) * fm.y * (1.0 - ck);
+        tongue = min(front, 1.0) * fm.z * (1.0 - ck);
         heat += front * 0.4 * exp(-max(fd, 0.0) / 0.04);
-        spec *= 1.0 - 0.75 * min(front, 1.0) * exp(-max(fd, 0.0) / 0.09);
+        spec *= 1.0 - 0.75 * min(front, 1.0) * max(exp(-max(fd, 0.0) / 0.09), fm.y * (1.0 - ck));
         face = min(front, 1.0) * smoothstep(0.012, -0.012, fd);
       }
       float blob = min(heat, 1.0);
@@ -503,6 +632,9 @@ void main() {
       float rim = pow(1.0 - ndv, 3.0);
       // Where lava presses on the skin the mirror thins and the glow comes through.
       vec3 lit = spec * (1.0 - 0.15 * blob) + inner * (1.0 - 0.8 * F * (1.0 - 0.5 * blob)) + uColor * uGlow * 0.12 * rim;
+      // Inside the mouth: a dim lava glow, deeper towards the top; the tongue a warmer pink.
+      lit = mix(lit, uLava * 0.22, cavity);
+      lit = mix(lit, mix(uLava, vec3(1.0, 0.42, 0.5), 0.6) * 0.85, tongue);
       lit = mix(lit, mix(uLava, vec3(1.0), 0.7) * 1.1, face);
       col = mix(col, lit, cov);
     }

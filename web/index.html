@@ -23,6 +23,26 @@
         font: 300 clamp(32px, 7vmin, 80px)/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
         font-variant-numeric: tabular-nums; letter-spacing: 0.04em; pointer-events: none;
       }
+      #weather {
+        position: fixed; left: 16px; right: 16px; bottom: max(5vh, calc(env(safe-area-inset-bottom) + 48px));
+        display: flex; justify-content: center; align-items: center; gap: clamp(10px, 3vmin, 40px);
+        color: rgba(255, 255, 255, 0.62); font: 400 clamp(12px, 2.2vmin, 22px)/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        font-variant-numeric: tabular-nums; pointer-events: none; opacity: 0; transition: opacity 1.2s ease;
+      }
+      #weather.on { opacity: 1; }
+      #weather .now {
+        font: 300 clamp(28px, 6vmin, 64px)/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        color: rgba(255, 255, 255, 0.78); transition: opacity 1s ease, max-width 1s ease; max-width: 3em; overflow: hidden;
+      }
+      #weather .now.off { opacity: 0; max-width: 0; }
+      #weather .week { display: flex; justify-content: center; gap: clamp(6px, 3vmin, 36px); max-width: 100%; }
+      #weather .day { display: flex; flex-direction: column; align-items: center; gap: 0.35em; min-width: 2.6em; }
+      #weather .day svg { width: 1.9em; height: 1.9em; }
+      #weather .dn { text-transform: capitalize; font-size: 0.85em; opacity: 0.75; }
+      #weather .today .dn { opacity: 1; color: rgba(255, 255, 255, 0.85); }
+      #weather .hi { color: rgba(255, 255, 255, 0.82); }
+      #weather .lo { opacity: 0.55; }
+      #weather .rp { font-size: 0.75em; color: rgba(120, 180, 255, 0.8); min-height: 1em; }
       #enroll {
         position: fixed; left: 16px; right: 16px; top: max(24px, env(safe-area-inset-top));
         text-align: center; color: #fff; font: 22px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -44,6 +64,7 @@
     <canvas id="blob"></canvas>
     <div id="fault" role="status" aria-live="polite"></div>
     <div id="timer" hidden></div>
+    <div id="weather" aria-hidden="true"></div>
     <div id="enroll" hidden></div>
     <div id="diag" hidden></div>
     <script type="module" src="/src/main.ts"></script>

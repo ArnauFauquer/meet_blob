@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     # itself through POST /alerts.
     timer_rule: bool = True
 
+    # Idle screen weather (Open-Meteo, no key). Off unless both are set.
+    weather_lat: float | None = Field(None, ge=-90, le=90)
+    weather_lon: float | None = Field(None, ge=-180, le=180)
+    weather_refresh_s: float = Field(1200, ge=60)
+
     # Debug switch: keep the last DEBUG_AUDIO_KEEP utterances as WAV files in this folder (off when
     # empty). Personal voice recordings: turn it off and delete the folder after debugging.
     debug_audio_dir: str = ""
