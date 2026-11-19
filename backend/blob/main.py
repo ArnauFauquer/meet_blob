@@ -21,6 +21,7 @@ from starlette.responses import Response
 from starlette.types import Scope
 
 from . import alerts, oidc
+from . import weather as weather_api
 from .alerts import Alerts, run_scheduler
 from .auth import Sessions, User, require_user, websocket_user
 from .config import Settings
@@ -34,6 +35,7 @@ from .hub import Hub
 from .stt import SttResult, WhisperStt
 from .tts import KokoroTts
 from .turn import TurnManager
+from .weather import WeatherService
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +93,7 @@ def create_app(
     models: tuple[SttModel, TtsModel] | None = None,
     hermes_transport: httpx.AsyncBaseTransport | None = None,
     oidc_transport: httpx.AsyncBaseTransport | None = None,
+    weather_transport: httpx.AsyncBaseTransport | None = None,
     wall: Callable[[], float] = time.time,
 ) -> FastAPI:
     stt, tts = models or _models(settings)
@@ -121,6 +124,17 @@ def create_app(
         st.hub = Hub(lambda: st.ready)
         if settings.auth_disabled:
             log.warning("AUTH_DISABLED is on: no sign-in, everyone is the user 'dev' (local only)")
+        st.weather = (
+            WeatherService(
+                settings.weather_lat,
+                settings.weather_lon,
+                settings.weather_refresh_s,
+                transport=weather_transport,
+                wall=wall,
+            )
+            if settings.weather_lat is not None and settings.weather_lon is not None
+            else None
+        )
         if settings.debug_audio_dir:
             st.hub.audio_dump = AudioDump(
                 settings.debug_audio_dir, settings.debug_audio_keep, settings.debug_wake_keep
@@ -154,6 +168,8 @@ def create_app(
             asyncio.create_task(_check_hermes(app)),
             asyncio.create_task(_retention(app, settings.retention_days)),
         ]
+        if st.weather:
+            tasks.append(asyncio.create_task(st.weather.run()))
         try:
             yield
         finally:
@@ -164,6 +180,8 @@ def create_app(
                     await t
             await st.hermes.aclose()
             await st.oidc.aclose()
+            if st.weather:
+                await st.weather.aclose()
             st.db.close()
 
     app = FastAPI(title="Blob", lifespan=lifespan)
@@ -178,6 +196,7 @@ def create_app(
     app.state.settings = settings
     app.state.ready = False
     app.state.hermes_reachable = None
+    app.state.weather = None
 
     @app.get("/healthz")
     async def healthz(request: Request) -> dict[str, Any]:
@@ -205,6 +224,7 @@ def create_app(
 
     app.include_router(alerts.router)
     app.include_router(oidc.router)
+    app.include_router(weather_api.router)
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket) -> None:

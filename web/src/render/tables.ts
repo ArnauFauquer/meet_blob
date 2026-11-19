@@ -47,13 +47,73 @@ export function lookFor(view: Exclude<View, 'alert'>): Look {
 }
 
 // Shape ids understood by shape() in blob.frag.
-export const SHAPE = { sphere: 0, triangle: 1, square: 2, clock: 3 } as const;
+export const SHAPE = { sphere: 0, triangle: 1, square: 2, clock: 3, weather: 4 } as const;
 export type ShapeId = (typeof SHAPE)[keyof typeof SHAPE];
 
 // Clock: after CLOCK_AFTER_MS in idle the blob rests as a digital clock, in
 // the idle colours with a calmer surface so the digits stay readable.
 export const CLOCK_AFTER_MS = 5 * 60_000;
 export const CLOCK_LOOK: Look = { ...STATE_LOOK.idle, speed: 0.15, amp: 0.04, breath: 0.012 };
+
+// Weather: the idle rest takes turns between the clock and the sky outside
+// (CLOCK_TURN_MS of clock, then WEATHER_TURN_MS of weather).
+export const CLOCK_TURN_MS = 30_000;
+export const WEATHER_TURN_MS = 20_000;
+
+export type WeatherKind = 'clear' | 'partly' | 'cloudy' | 'fog' | 'rain' | 'snow' | 'storm';
+export interface Sky {
+  kind: WeatherKind;
+  day: boolean; // a clear night shows the moon
+}
+
+// Weights of the weather shape's parts (uSky, uFall in blob.frag) and where
+// the face sits on it (uFaceT: offset, scale).
+export interface SkyParts {
+  sun: number;
+  moon: number;
+  cloud: number;
+  fall: number; // drops (or flakes) falling
+  snow: number; // 0 rain, 1 flakes
+  faceX: number;
+  faceY: number;
+  faceS: number;
+}
+
+export function skyParts({ kind, day }: Sky): SkyParts {
+  const orb = kind === 'clear' || kind === 'partly';
+  const cloud = kind !== 'clear' ? 1 : 0;
+  const moon = orb && !day ? 1 : 0;
+  // Alone, the moon's face sits on the crescent left by the bite; with a cloud it sits on the cloud.
+  const face = cloud ? { faceX: 0, faceY: -0.02, faceS: 0.8 } : moon ? { faceX: -0.3, faceY: -0.16, faceS: 0.58 } : { faceX: 0, faceY: 0, faceS: 0.9 };
+  return {
+    sun: orb && day ? 1 : 0,
+    moon,
+    cloud,
+    fall: kind === 'rain' || kind === 'snow' || kind === 'storm' ? 1 : 0,
+    snow: kind === 'snow' ? 1 : 0,
+    ...face,
+  };
+}
+
+// Colours and faces of the weather: a warm, beaming sun; a sleepy moon; a
+// calm grey-blue cloud; rain looking up at its drops; delighted snow; a
+// startled storm.
+const WEATHER_COLOR: Record<WeatherKind | 'night', [Look['color'], Look['lava'], Partial<Face>]> = {
+  clear: [[1.0, 0.62, 0.08], [1.0, 0.72, 0.12], { happy: 1, smile: 2.1, eyeY: 0.06 }],
+  night: [[0.25, 0.3, 0.95], [0.75, 0.8, 1.0], { happy: 1, smile: 1.2, eyeH: 0.02 }],
+  partly: [[0.85, 0.6, 0.3], [1.0, 0.75, 0.35], { happy: 0.6, smile: 1.8 }],
+  cloudy: [[0.42, 0.5, 0.75], [0.7, 0.78, 0.95], { smile: 1.1, eyeH: 0.13 }],
+  fog: [[0.5, 0.52, 0.6], [0.75, 0.78, 0.85], { smile: 0.8, eyeH: 0.09 }],
+  rain: [[0.1, 0.38, 1.0], [0.25, 0.6, 1.0], { smile: 0.6, gazeY: 0.08 }],
+  snow: [[0.55, 0.8, 1.0], [0.85, 0.95, 1.0], { happy: 1, smile: 1.9 }],
+  storm: [[0.48, 0.18, 0.9], [0.65, 0.4, 1.0], { eyeW: 0.13, eyeH: 0.15, smile: 0, mouth: 0.06 }],
+};
+
+export function weatherLook({ kind, day }: Sky): Look {
+  const night = !day && (kind === 'clear' || kind === 'partly');
+  const [color, lava, face] = WEATHER_COLOR[night ? 'night' : kind];
+  return { ...CLOCK_LOOK, ...FACE, ...face, color: [...color], lava: [...lava], speed: 0.2, amp: 0.05, glow: 0.9, bright: 0.95 };
+}
 
 // HH:MM in local time as four digits.
 export function clockDigits(d: Date): [number, number, number, number] {

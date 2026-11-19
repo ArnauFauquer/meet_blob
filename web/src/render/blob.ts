@@ -15,7 +15,21 @@ import {
 } from 'three';
 import fragmentShader from './blob.frag?raw';
 import vertexShader from './blob.vert?raw';
-import { CLOCK_LOOK, LOBE_COUNT, SHAPE, alertLook, alertShape, clockDigits, lobes, lookFor, type Look } from './tables';
+import {
+  CLOCK_LOOK,
+  LOBE_COUNT,
+  SHAPE,
+  alertLook,
+  alertShape,
+  clockDigits,
+  lobes,
+  lookFor,
+  skyParts,
+  weatherLook,
+  type Look,
+  type Sky,
+  type SkyParts,
+} from './tables';
 import { Actor, rest, scaled, type Mood, type Pose } from './acts';
 import { morphMix, newTwirl, stepMorph, stepTwirl, type Morph } from './morph';
 import type { AlertItem } from '../protocol';
@@ -48,6 +62,50 @@ const HOP = 0.22; // morph hop height (the blob radius is 0.78)
 const isAlertShape = (s: number) => s === SHAPE.triangle || s === SHAPE.square;
 const LEAN_HZ = 2.2;
 
+// Mouth shapes while speaking, one per syllable: half width, opening (times
+// the look's talk), pucker (0 wide lips, 1 round). Roughly a, e, i, o, u, m.
+const VOWELS: readonly [number, number, number][] = [
+  [0.21, 1, 0],
+  [0.25, 0.6, 0],
+  [0.27, 0.38, 0],
+  [0.14, 0.85, 1],
+  [0.11, 0.55, 1],
+  [0.2, 0.18, 0.2],
+];
+const MOUTH_W = 0.2; // half width at rest
+
+// A damped spring towards `to`, in substeps so a long frame cannot blow it up.
+function spring(s: { x: number; v: number }, to: number, hz: number, damp: number, dt: number): void {
+  const w = 2 * Math.PI * hz;
+  const n = Math.max(1, Math.ceil(dt * 240));
+  for (let i = 0; i < n; i++) {
+    const h = dt / n;
+    s.v += (-w * w * (s.x - to) - 2 * damp * w * s.v) * h;
+    s.x += s.v * h;
+  }
+}
+
+interface MouthState {
+  open: { x: number; v: number };
+  w: { x: number; v: number };
+  pucker: { x: number; v: number };
+  tilt: number;
+  env: number; // fast envelope of the speech level: closes between syllables
+  peak: number; // recent loudest envelope, to normalise it
+  armed: boolean; // the envelope dipped: the next rise is a new syllable
+  n: number; // syllable count, picks the vowel
+}
+const newMouth = (): MouthState => ({
+  open: { x: 0, v: 0 },
+  w: { x: MOUTH_W, v: 0 },
+  pucker: { x: 0, v: 0 },
+  tilt: 0,
+  env: 0,
+  peak: 0.05,
+  armed: true,
+  n: 0,
+});
+
 // Largest stretch of a 3x3 map (its top singular value), by power iteration.
 const v3 = new Vector3();
 const ata = new Matrix3();
@@ -63,10 +121,13 @@ export interface FrameInput {
   level: number; // mic level while listening, playback level while speaking
   alert?: Pick<AlertItem, 'source' | 'urgency'> | null; // the top alert, drawn when view is 'alert'
   clock?: Date | null; // the time to show: the idle blob rests as a clock while this is set
+  weather?: Sky | null; // the sky outside: the idle blob shows it while this is set (before the clock)
+  lift?: number; // the resting clock or sky rises this much (world units) to leave room under it
 }
 
 function targetOf(i: FrameInput): { look: Look; shape: number } {
   if (i.view === 'alert' && i.alert) return { look: alertLook(i.alert.urgency), shape: alertShape(i.alert.source) };
+  if (i.view === 'idle' && i.weather) return { look: weatherLook(i.weather), shape: SHAPE.weather };
   if (i.view === 'idle' && i.clock) return { look: CLOCK_LOOK, shape: SHAPE.clock };
   return { look: lookFor(i.view === 'alert' ? 'idle' : i.view), shape: SHAPE.sphere };
 }
@@ -112,8 +173,16 @@ export class BlobRenderer {
   private alertW = 0; // 0..1 weight of the alert bounce
   private urgentW = 0; // 0..1 weight of the urgent tremble
   private clockW = 0; // 0..1 weight of the clock float
+  private restW = 0; // 0..1 weight of a resting shape (clock or sky)
+  private lift = 0; // eased FrameInput.lift
   private glance = { n: 1, t: 0, x: 0, y: 0 }; // eye saccades: n-th glance, time in it, current offset
   private lastView: View | null = null;
+  private mouth = newMouth();
+  private sky: SkyParts = skyParts({ kind: 'clear', day: true });
+  private fallT = 0; // fall time of the drops or flakes
+  private skyShown = false; // the weather shape was on screen last frame
+  private boltT = 3; // storm: time to the next lightning
+  private bolt2 = 0; // storm: time to the second, fainter flash
   private raf = 0;
   quality = MAX_QUALITY;
   autoQuality = true;
@@ -134,7 +203,7 @@ export class BlobRenderer {
       fragmentShader,
       depthTest: false,
       depthWrite: false,
-      defines: { QUALITY: MAX_QUALITY },
+      defines: { QUALITY: MAX_QUALITY, WEATHER: 0 },
       uniforms: {
         uRes: { value: new Vector2() },
         uFlow: { value: 0 },
@@ -164,6 +233,10 @@ export class BlobRenderer {
         uBodyR: { value: 1 },
         uDigitY: { value: new Vector4() },
         uColon: { value: 0 },
+        uMouthShape: { value: new Vector4(MOUTH_W, 0, 0, 1) },
+        uSky: { value: new Vector4() },
+        uFall: { value: new Vector3() },
+        uFaceT: { value: new Vector3(0, 0, 1) },
       },
     });
     this.scene.add(new Mesh(new PlaneGeometry(2, 2), this.material));
@@ -218,9 +291,14 @@ export class BlobRenderer {
 
   // Debug clock for the film strip: stop the loop and restart the motion from
   // zero in `view`'s look, so frames are reproducible.
-  freeze(view: View, clock?: Date | null, alert?: FrameInput['alert']): void {
+  freeze(view: View, clock?: Date | null, alert?: FrameInput['alert'], weather?: Sky | null): void {
     this.stop();
-    const { look, shape } = targetOf({ view, level: 0, clock, alert });
+    const { look, shape } = targetOf({ view, level: 0, clock, alert, weather });
+    this.mouth = newMouth();
+    if (weather) this.sky = skyParts(weather);
+    this.fallT = 0;
+    this.boltT = 3;
+    this.skyShown = shape === SHAPE.weather;
     Object.assign(this.cur, structuredClone(look));
     Object.assign(this.morph, { a: shape, b: shape, t: 0 });
     const u = this.material.uniforms;
@@ -234,6 +312,8 @@ export class BlobRenderer {
     this.alertW = isAlertShape(shape) ? 1 : 0;
     this.urgentW = alert?.urgency === 'urgent' && view === 'alert' ? 1 : 0;
     this.clockW = shape === SHAPE.clock ? 1 : 0;
+    this.restW = shape === SHAPE.clock || shape === SHAPE.weather ? 1 : 0;
+    this.lift = 0;
     this.glance = { n: 1, t: 0, x: 0, y: 0 };
   }
 
@@ -271,6 +351,10 @@ export class BlobRenderer {
   }
 
   private advance(dt: number, fi: FrameInput): void {
+    if (fi.weather && this.material.defines.WEATHER !== 1) {
+      this.material.defines.WEATHER = 1; // one shader rebuild, the first time the sky shows
+      this.material.needsUpdate = true;
+    }
     const { level } = fi;
     const { look: target, shape } = targetOf(fi);
     const wasMorphing = this.morph.a !== this.morph.b;
@@ -330,9 +414,70 @@ export class BlobRenderer {
     u.uMix.value = morphMix(this.morph);
     (u.uEyes.value as Vector4).set(c.eyeW, Math.max(0.012, c.eyeH * open), c.eyeY, c.happy);
     (u.uGaze.value as Vector2).set(c.gazeX, c.gazeY);
-    (u.uMouth.value as Vector3).set(c.smile, c.mouth + c.talk * this.level, c.face);
+    this.stepMouth(dt, fi, c);
+    this.stepSky(dt, fi);
     lobes(u.uFlow.value as number, c.amp, u.uLobes.value as Float32Array);
     this.animateBody(dt, fi, shape, wasMorphing, phase0);
+  }
+
+  // The mouth. Speaking, a fast envelope of the playback level opens it on
+  // each syllable and closes it in between, and each syllable gets its own
+  // vowel shape (wide, narrow, round), all on jelly springs that overshoot a
+  // little. At rest it keeps drifting into a lopsided grin and back; thinking
+  // pulls it to one side ("hmm").
+  private stepMouth(dt: number, fi: FrameInput, c: Look): void {
+    const mo = this.mouth;
+    const talkW = Math.min(1, c.talk / 0.12); // how much of the speaking look is in
+    const raw = talkW > 0.01 ? fi.level : 0;
+    mo.env += (raw - mo.env) * (1 - Math.exp(-dt / (raw > mo.env ? 0.025 : 0.07)));
+    mo.peak = Math.max(0.04, mo.peak * Math.exp(-dt / 2), mo.env);
+    const e = Math.min(1, mo.env / mo.peak);
+    if (mo.armed && e > 0.6) {
+      mo.armed = false;
+      mo.n++;
+    } else if (e < 0.35) mo.armed = true;
+    const v = VOWELS[Math.floor(rnd(mo.n, 4) * VOWELS.length) % VOWELS.length];
+    const say = talkW * Math.min(1, e * 2);
+    const openTo = c.mouth * (1 - 0.65 * talkW) + c.talk * 1.8 * talkW * e ** 0.7 * v[1];
+    spring(mo.open, openTo, 11, 0.4, dt);
+    spring(mo.w, MOUTH_W + 0.012 * c.smile + say * (v[0] - MOUTH_W), 7, 0.5, dt);
+    spring(mo.pucker, say * v[2], 7, 0.6, dt);
+    const t = this.t;
+    const drift = 0.08 * Math.sin(t * 0.31) * Math.sin(t * 0.17 + 1);
+    const hmm = fi.view === 'thinking' ? 0.16 + 0.06 * Math.sin(t * 1.3) : 0;
+    const twist = talkW * 0.12 * (rnd(mo.n, 6) - 0.5);
+    mo.tilt += (drift * (1 - talkW) + hmm + twist - mo.tilt) * (1 - Math.exp(-dt / 0.25));
+    const u = this.material.uniforms;
+    (u.uMouth.value as Vector3).set(c.smile + 0.25 * Math.sin(t * 0.23) * (1 - talkW), Math.max(0, mo.open.x), c.face);
+    (u.uMouthShape.value as Vector4).set(Math.max(0.06, mo.w.x), mo.tilt, Math.max(0, Math.min(1, mo.pucker.x)), 1);
+  }
+
+  // The weather shape's parts melt from one sky to the next; drops fall; a
+  // storm flashes now and then (twice, the second fainter) and startles the blob.
+  private stepSky(dt: number, fi: FrameInput): void {
+    const u = this.material.uniforms;
+    const showing = this.morph.a === SHAPE.weather || this.morph.b === SHAPE.weather;
+    const shown = this.skyShown;
+    this.skyShown = showing;
+    if (fi.weather) {
+      const to = skyParts(fi.weather);
+      const k = shown ? 1 - Math.exp(-dt / 0.8) : 1; // coming on screen: take the new sky at once
+      for (const key of Object.keys(to) as (keyof SkyParts)[]) this.sky[key] += (to[key] - this.sky[key]) * k;
+    }
+    const s = this.sky;
+    this.fallT += dt * (0.75 - 0.5 * s.snow);
+    (u.uSky.value as Vector4).set(s.sun, s.moon, s.cloud, 0);
+    (u.uFall.value as Vector3).set(s.fall, s.snow, this.fallT);
+    (u.uFaceT.value as Vector3).set(s.faceX, s.faceY, s.faceS);
+    if (fi.weather?.kind !== 'storm' || this.morph.a !== SHAPE.weather || this.morph.b !== SHAPE.weather) return;
+    this.boltT -= dt;
+    if (this.boltT <= 0) {
+      this.flashT = 1;
+      this.bolt2 = 0.14;
+      this.boltT = 2.5 + 4.5 * rnd(Math.floor(this.t), 7);
+      this.kick(-1.4);
+    }
+    if (this.bolt2 > 0 && (this.bolt2 -= dt) <= 0) this.flashT = Math.max(this.flashT, 0.6);
   }
 
   // Debug and film strips: start an act now (names in ACTS, acts.ts).
@@ -354,6 +499,8 @@ export class BlobRenderer {
     this.alertW += ((isAlertShape(shape) ? 1 : 0) - this.alertW) * k;
     this.urgentW += ((fi.view === 'alert' && fi.alert?.urgency === 'urgent' ? 1 : 0) - this.urgentW) * k;
     this.clockW += ((shape === SHAPE.clock ? 1 : 0) - this.clockW) * k;
+    this.restW += ((shape === SHAPE.clock || shape === SHAPE.weather ? 1 : 0) - this.restW) * k;
+    this.lift += ((fi.lift ?? 0) - this.lift) * (1 - Math.exp(-dt / 0.6));
 
     // Kicks: a crouch before a morph jumps, a landing after it, a small
     // jiggle on any other change of view.
@@ -398,7 +545,7 @@ export class BlobRenderer {
     const calm = 1 - this.actW; // the ambient motion yields to an act
 
     const bounce = Math.max(0, Math.sin(phase)) * calm;
-    const hop = HOP * air + this.alertW * (0.1 - 0.03 * this.urgentW) * bounce + this.clockW * 0.035 * Math.sin(t * 0.8) + p.y;
+    const hop = HOP * air + this.alertW * (0.1 - 0.03 * this.urgentW) * bounce + this.restW * (0.035 * Math.sin(t * 0.8) + this.lift) + p.y;
     const shake = this.urgentW * calm * (0.011 * Math.sin(t * 47) + 0.007 * Math.sin(t * 31 + 1.3));
     const x = shake + p.x;
     (u.uBodyPos.value as Vector3).set(x, hop, p.z);

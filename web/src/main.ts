@@ -15,7 +15,7 @@ import { Diag, onPress } from './diag';
 import { FaultLine } from './fault';
 import type { AlertItem, ConvState, ServerMessage, TimerItem, TurnDoneMsg } from './protocol';
 import { BlobRenderer, type FrameInput } from './render/blob';
-import { CLOCK_AFTER_MS } from './render/tables';
+import { CLOCK_AFTER_MS, CLOCK_TURN_MS, WEATHER_TURN_MS, type Sky } from './render/tables';
 import { computeView, overlayActive, setsOverlay, timerText, topAlert, turnActive, type View } from './state';
 import { decideTap } from './taps';
 import { TurnClient, type TurnDeps } from './turn-client';
@@ -26,6 +26,7 @@ import { FollowUp, gateReason, wakeAllowed } from './wake/wake-gate';
 import { MicStats, PeakTracker, type WakePeak } from './wake/wake-log';
 import { checkVersion, entryBundle } from './version';
 import { keepAwake } from './wakelock';
+import { WEATHER_POLL_MS, fetchWeather, restShows, skyOf, weatherHtml, type Weather } from './weather';
 import { BlobSocket, type SocketStatus } from './ws';
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
@@ -135,6 +136,18 @@ function view(): View {
 }
 
 let idleSince = performance.now(); // start of the current unbroken idle stretch
+let weather: Weather | null = null;
+// The resting blob rises over the week strip (world units, the blob radius is
+// 0.78); the sky more than the clock, for the drops falling from it.
+const REST_LIFT = { clock: 0.16, weather: 0.26 };
+
+// After CLOCK_AFTER_MS of idle the blob rests: as a clock, taking turns with
+// the sky outside when the backend has the weather.
+function rest(now: number): 'none' | 'clock' | 'weather' {
+  const ms = now - idleSince - CLOCK_AFTER_MS;
+  if (ms < 0) return 'none';
+  return weather ? restShows(ms, CLOCK_TURN_MS, WEATHER_TURN_MS) : 'clock';
+}
 
 function frameInput(): FrameInput {
   const v = view();
@@ -143,8 +156,34 @@ function frameInput(): FrameInput {
   faults.set('mic_denied', capture.status === 'denied');
   const level =
     v === 'listening' ? capture.level() : v === 'speaking' || v === 'error' || v === 'alert' ? playback.level() : 0;
-  return { view: v, level, alert: v === 'alert' ? topAlert(alerts) : null, clock: now - idleSince >= CLOCK_AFTER_MS ? new Date() : null };
+  const r = rest(now);
+  const sky: Sky | null = r === 'weather' && weather ? skyOf(weather) : null;
+  return {
+    view: v,
+    level,
+    alert: v === 'alert' ? topAlert(alerts) : null,
+    clock: r !== 'none' ? new Date() : null,
+    weather: sky,
+    lift: weather && r !== 'none' ? REST_LIFT[r] : 0,
+  };
 }
+
+// The week strip under the resting blob; the temperature now joins it while the blob shows the sky.
+let weatherShown = '';
+function showWeather(): void {
+  const el = $('weather');
+  const r = view() === 'idle' ? rest(performance.now()) : 'none';
+  const html = weather && r !== 'none' ? weatherHtml(weather, r === 'weather') : '';
+  el.classList.toggle('on', !!html);
+  if (html && html !== weatherShown) el.innerHTML = weatherShown = html;
+}
+setInterval(showWeather, 500);
+
+async function pollWeather(): Promise<void> {
+  weather = (await fetchWeather()) ?? weather;
+}
+void pollWeather();
+setInterval(() => void pollWeather(), WEATHER_POLL_MS);
 
 // Chime once per new alert, held while a turn is active (design, Display rules).
 function checkChime(): void {
@@ -508,8 +547,9 @@ window.blobDebug = {
   },
   // `clock`: a local time such as '2026-01-01T09:41', to draw the idle clock.
   // `alert`: the top alert drawn when `v` is 'alert'.
-  step(dtS: number, v: View, level: number, draw: boolean, clock?: string, alert?: FrameInput['alert']) {
-    renderer?.step(dtS, { view: v, level, clock: clock ? new Date(clock) : null, alert }, draw);
+  // `weather`: the sky drawn when `v` is 'idle' (before the clock).
+  step(dtS: number, v: View, level: number, draw: boolean, clock?: string, alert?: FrameInput['alert'], weather?: Sky) {
+    renderer?.step(dtS, { view: v, level, clock: clock ? new Date(clock) : null, alert, weather }, draw);
   },
   // Pretends the page has been idle for `ms` (the clock appears after CLOCK_AFTER_MS).
   idleFor(ms: number) {
@@ -545,8 +585,11 @@ window.blobDebug = {
   act(name: string) {
     renderer?.play(name);
   },
-  freeze(v?: View, clock?: string, alert?: FrameInput['alert']) {
-    if (v) renderer?.freeze(v, clock ? new Date(clock) : null, alert);
+  get weather() {
+    return weather;
+  },
+  freeze(v?: View, clock?: string, alert?: FrameInput['alert'], sky?: Sky) {
+    if (v) renderer?.freeze(v, clock ? new Date(clock) : null, alert, sky);
     else renderer?.stop();
   },
 };

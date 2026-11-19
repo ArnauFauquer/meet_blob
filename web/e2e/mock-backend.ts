@@ -241,6 +241,21 @@ const TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml',
 };
 
+// GET /weather: a rainy week, as the backend reports it from Open-Meteo.
+const MOCK_WEATHER = {
+  current: { temp: 14.6, kind: 'rain', day: true },
+  days: [
+    ['rain', 16, 11, 85],
+    ['storm', 15, 10, 90],
+    ['cloudy', 17, 9, 20],
+    ['partly', 19, 10, 10],
+    ['clear', 21, 11, 0],
+    ['clear', 22, 12, 0],
+    ['snow', 3, -2, 60],
+  ].map(([kind, max, min, rain], i) => ({ date: `2026-11-${String(19 + i).padStart(2, '0')}`, kind, max, min, rain })),
+  updated: 0,
+};
+
 async function serve(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? '/', 'http://x');
   if (url.pathname === '/healthz') {
@@ -268,6 +283,11 @@ async function serve(req: IncomingMessage, res: ServerResponse) {
         debug_audio: device.includes('debug'),
       }),
     );
+  }
+  if (url.pathname === '/weather') {
+    if (sessionDevice(req) === null) return res.writeHead(401).end();
+    res.setHeader('content-type', 'application/json');
+    return res.end(JSON.stringify(MOCK_WEATHER));
   }
   if (url.pathname === '/alerts' || url.pathname.startsWith('/alerts/')) return alertsApi(req, res, url);
   const rel = normalize(url.pathname === '/' ? '/index.html' : url.pathname).replace(/^(\.\.[/\\])+/, '');
