@@ -7,7 +7,12 @@ class FakeSource {
   onended: (() => void) | null = null;
   startedAt = -1;
   stopped = false;
-  connect() {}
+  playbackRate = { value: 1 };
+  to: unknown = null;
+  connect<T>(n: T): T {
+    this.to = n;
+    return n;
+  }
   start(t: number) {
     this.startedAt = t;
   }
@@ -25,6 +30,9 @@ class FakeCtx {
   decodeAudioData = vi.fn(async (b: ArrayBuffer) => ({ duration: new Uint8Array(b)[0] }));
   createAnalyser() {
     return { fftSize: 0, connect() {}, getFloatTimeDomainData: (a: Float32Array) => a.fill(0.1) };
+  }
+  createGain() {
+    return { gain: { value: 1 }, connect: <T>(n: T) => n };
   }
   createBufferSource() {
     const s = new FakeSource();
@@ -142,6 +150,15 @@ describe('Playback', () => {
     expect(ctx.sources[0].stopped).toBe(false);
     await pb.effect('/chime.wav');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('an effect can play softer and detuned (the alarm)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(wav(1))));
+    await pb.effect('/bubble-a.wav', 0.5, 1.1);
+    const s = ctx.sources[0];
+    expect(s.playbackRate.value).toBe(1.1);
+    expect((s.to as { gain: { value: number } }).gain.value).toBe(0.5);
     vi.unstubAllGlobals();
   });
 });

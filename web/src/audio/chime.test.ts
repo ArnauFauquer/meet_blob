@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { ChimeRules, inQuietHours, type ChimeConfig } from './chime';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ALARM_DETUNE, ALARM_EVERY_MS, pickRing, ALARM_MS, ALARM_START_GAIN, Alarm, alarmGain, ChimeRules, inQuietHours, type ChimeConfig } from './chime';
 import type { AlertItem } from '../protocol';
 
 const at = (h: number, m = 0) => new Date(2026, 10, 12, h, m);
@@ -74,5 +74,106 @@ describe('ChimeRules', () => {
     setClock(at(8));
     expect(r.update([alert('a')], false)).toBe(false);
     expect(r.update([alert('a'), alert('b')], false)).toBe(true);
+  });
+});
+
+describe('Alarm', () => {
+  function alarm() {
+    let t = 0;
+    let hush = false;
+    let rings = 0;
+    const gains: number[] = [];
+    const a = new Alarm({ ring: (g) => (rings += 1, gains.push(g)), hush: () => hush, now: () => t });
+    const advance = (ms: number) => {
+      for (let i = 0; i < ms; i += 100) {
+        t += 100;
+        vi.advanceTimersByTime(100);
+      }
+    };
+    return { a, advance, gains, rings: () => rings, setHush: (h: boolean) => (hush = h) };
+  }
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('repeats the sound for 30 s, then stops', () => {
+    const { a, advance, rings } = alarm();
+    a.start(['a']);
+    expect(rings()).toBe(1);
+    advance(ALARM_EVERY_MS);
+    expect(rings()).toBe(2);
+    advance(ALARM_MS);
+    expect(a.ringing).toBe(false);
+    const n = rings();
+    expect(n).toBe(Math.ceil(ALARM_MS / ALARM_EVERY_MS));
+    advance(10_000);
+    expect(rings()).toBe(n);
+  });
+  it('starts soft and swells to full volume', () => {
+    const { a, advance, gains } = alarm();
+    a.start(['a']);
+    advance(ALARM_MS);
+    expect(gains[0]).toBe(ALARM_START_GAIN);
+    for (let i = 1; i < gains.length; i++) expect(gains[i]).toBeGreaterThanOrEqual(gains[i - 1]);
+    expect(gains.at(-1)).toBe(1);
+    expect(alarmGain(-5)).toBe(ALARM_START_GAIN);
+  });
+  it('stops when its alerts leave the snapshot', () => {
+    const { a, rings, advance } = alarm();
+    a.start(['a', 'b']);
+    a.update(['b', 'c']);
+    expect(a.ringing).toBe(true);
+    a.update(['c']);
+    expect(a.ringing).toBe(false);
+    advance(ALARM_EVERY_MS * 3);
+    expect(rings()).toBe(1);
+  });
+  it('stops when hushed (a turn, a read) or on stop()', () => {
+    const { a, advance, setHush } = alarm();
+    a.start(['a']);
+    setHush(true);
+    advance(ALARM_EVERY_MS);
+    expect(a.ringing).toBe(false);
+    setHush(false);
+    a.start(['b']);
+    a.stop();
+    expect(a.ringing).toBe(false);
+  });
+  it('a new alert while ringing joins it and gives it another 30 s', () => {
+    const { a, advance } = alarm();
+    a.start(['a']);
+    advance(20_000);
+    a.start(['b']);
+    expect(a.started).toBe(1);
+    advance(20_000);
+    expect(a.ringing).toBe(true);
+    advance(10_000 + ALARM_EVERY_MS);
+    expect(a.ringing).toBe(false);
+  });
+  it('remembers which alerts a play was for', () => {
+    const { r } = rules();
+    r.update([alert('a'), alert('b')], false);
+    expect(r.fired).toEqual(['a', 'b']);
+  });
+});
+
+describe('pickRing', () => {
+  it('never repeats the previous sound and uses them all', () => {
+    const seen = new Set<number>();
+    let prev = -1;
+    for (let i = 0; i < 200; i++) {
+      const { index } = pickRing(prev, 3, Math.random);
+      expect(index).not.toBe(prev);
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(index).toBeLessThan(3);
+      seen.add(index);
+      prev = index;
+    }
+    expect(seen.size).toBe(3);
+  });
+  it('detunes within the limit', () => {
+    expect(pickRing(-1, 3, () => 0).rate).toBeCloseTo(1 - ALARM_DETUNE);
+    expect(pickRing(-1, 3, () => 0.999999).rate).toBeCloseTo(1 + ALARM_DETUNE);
+    expect(pickRing(2, 3, () => 0.999999).index).toBe(1);
+    expect(pickRing(0, 1, () => 0.5).index).toBe(0);
   });
 });

@@ -62,14 +62,20 @@ export class Playback {
 
   // A short sound outside any turn (the alert chime, the beep for an alert that
   // cannot be read). It does not count as `playing` and stopAll does not stop it.
-  async effect(url: string): Promise<boolean> {
+  async effect(url: string, gain = 1, rate = 1): Promise<boolean> {
     const bytes = await this.file(url);
     if (!bytes) return false;
     try {
       const audio = await this.ctx.decodeAudioData(bytes.slice(0));
       const src = this.ctx.createBufferSource();
       src.buffer = audio;
-      src.connect(this.ctx.destination);
+      src.playbackRate.value = rate;
+      if (gain === 1) src.connect(this.ctx.destination);
+      else {
+        const g = this.ctx.createGain();
+        g.gain.value = gain;
+        src.connect(g).connect(this.ctx.destination);
+      }
       src.start();
       this.effects += 1;
       return true;

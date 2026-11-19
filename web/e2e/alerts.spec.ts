@@ -100,25 +100,28 @@ test('an alert raised during a turn is held hidden until the turn ends', async (
   expect(recv(await log(page), 'turn_done')).toHaveLength(1);
 });
 
-test('the chime plays once per alert on a sound=true device, held during a turn', async ({ page }) => {
+test('a new alert rings the alarm once on a sound=true device, a tap silences it, held during a turn', async ({ page }) => {
   await openBlob(page, 'e2e-sound');
   await waitView(page, 'idle');
   await page.waitForTimeout(500); // /device-config read
   const a = await alerts.post('chime-a', { source: 'calendar' });
-  await expect.poll(() => dbg<number>(page, 'effects'), { message: 'chime played' }).toBe(1);
+  await expect.poll(() => dbg<number>(page, 'alarms'), { message: 'alarm rang' }).toBe(1);
   await alerts.post('chime-a', { source: 'calendar', text: 'Updated text.' }, a); // same alert, new snapshot
   await page.waitForTimeout(1000);
-  expect(await dbg<number>(page, 'effects'), 'no second chime for the same alert').toBe(1);
-  await tap(page); // reads it and acks it
+  expect(await dbg<number>(page, 'alarms'), 'no second alarm for the same alert').toBe(1);
+  await expect.poll(() => dbg<number>(page, 'effects'), { message: 'the chime repeats while it rings' }).toBeGreaterThan(1);
+  expect(await dbg<boolean>(page, 'alarmRinging')).toBe(true);
+  await tap(page); // silences it, reads it and acks it
+  expect(await dbg<boolean>(page, 'alarmRinging'), 'a tap silences the alarm').toBe(false);
   await waitFor(page, (l) => sent(l, 'alert_ack').length > 0, 'alert_ack');
   await waitView(page, 'idle');
   // an alert raised during a turn chimes only when the turn ends
   await speak(page);
   await alerts.post('chime-b', { source: 'timer' });
   await waitFor(page, (l) => recv(l, 'snapshot').some((e) => (e.data?.alerts as unknown[])?.length), 'snapshot with the alert');
-  expect(await dbg<number>(page, 'effects'), 'held during the turn').toBe(1);
+  expect(await dbg<number>(page, 'alarms'), 'held during the turn').toBe(1);
   await waitView(page, 'alert');
-  await expect.poll(() => dbg<number>(page, 'effects')).toBe(2);
+  await expect.poll(() => dbg<number>(page, 'alarms')).toBe(2);
 });
 
 test('alert synthesis fails: the alert stays, the beep plays, no alert_ack (mock)', async ({ page }) => {

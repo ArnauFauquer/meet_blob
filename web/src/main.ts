@@ -1,7 +1,7 @@
 import { AlertReader } from './alert-reader';
 import { goSignIn } from './auth';
 import { Capture } from './audio/capture';
-import { CHIME_URL, ChimeRules } from './audio/chime';
+import { ALARM_SOUNDS, Alarm, ChimeRules, pickRing } from './audio/chime';
 import { Playback } from './audio/playback';
 import {
   DEFAULT_DEVICE_CONFIG,
@@ -120,12 +120,32 @@ ctx.onstatechange = () => {
 };
 syncAudioLock();
 
+// Set when the wake word read the alert: once it is read, listen for what the
+// person wanted to say, without the wake word again.
+let listenAfterRead = false;
 const reader = new AlertReader({
   send: (m) => sock.send(m),
   play: (wav) => playback.play(wav, null),
-  beep: () => void playback.effect('/beep.wav'),
+  beep: () => {
+    listenAfterRead = false;
+    void playback.effect('/beep.wav');
+  },
+  read: () => {
+    if (!listenAfterRead) return;
+    listenAfterRead = false;
+    if (handsFree) turn.startTurn('followup');
+  },
 });
 const chime = new ChimeRules(() => deviceConfig);
+let lastRing = -1;
+const alarm = new Alarm({
+  ring: (gain) => {
+    const r = pickRing(lastRing, ALARM_SOUNDS.length, Math.random);
+    lastRing = r.index;
+    void playback.effect(ALARM_SOUNDS[r.index], gain, r.rate);
+  },
+  hush: () => reader.reading || turnActive({ conv, playing: turnPlaying() }) || turn.phase !== 'idle',
+});
 
 // Playback of a turn reply (an alert being read aloud is not a turn).
 const turnPlaying = () => playback.playing && !reader.reading;
@@ -185,11 +205,15 @@ async function pollWeather(): Promise<void> {
 void pollWeather();
 setInterval(() => void pollWeather(), WEATHER_POLL_MS);
 
-// Chime once per new alert, held while a turn is active (design, Display rules).
+// A new alert rings a calm alarm (random bubbles for up to 30 s, swelling), held
+// while a turn is active (design, Display rules). It stops early on a tap, a
+// turn, or once the alert is gone.
 function checkChime(): void {
+  alarm.update(alerts.map((a) => a.key));
   if (!configLoaded) return; // the sound flag is not known yet
   const active = turnActive({ conv, playing: turnPlaying() }) || turn.phase !== 'idle';
-  if (chime.update(alerts, active)) void playback.effect(CHIME_URL);
+  if (active) alarm.stop();
+  if (chime.update(alerts, active)) alarm.start(chime.fired);
 }
 
 // After a reply with followup=true has played, listen once more without the wake word.
@@ -246,6 +270,18 @@ function onWakeScore(score: number): void {
   if (enroll) return showEnroll(); // enrollment: scores only, no turns
   if (!wakeCfg || score < wakeCfg.threshold || !gateOpen()) return;
   logPeak(peaks?.flush(performance.now()) ?? null); // the detector stops now: report this attempt first
+  // An alert waiting (its alarm may be ringing): read it first, then listen.
+  const a = view() === 'alert' ? topAlert(alerts) : null;
+  if (a) {
+    alarm.stop();
+    reader.read(a.key);
+    if (reader.key === a.key) {
+      listenAfterRead = true;
+      wakeStats.detections += 1;
+      renderer?.flash();
+    }
+    return;
+  }
   if (turn.startTurn('wake')) {
     wakeStats.detections += 1;
     renderer?.flash();
@@ -324,6 +360,7 @@ const sock = new BlobSocket({
     if (s !== 'open') {
       // The backend cancels the turn when the socket closes.
       reader.reset();
+      listenAfterRead = false;
       followup.clear();
       turn.reset();
       playback.stopAll();
@@ -406,6 +443,7 @@ function handle(m: ServerMessage, binary: ArrayBuffer | null): void {
 }
 
 function onTap(): void {
+  alarm.stop(); // any tap silences a ringing alert
   if (diag.open) {
     diag.hide();
     return;
@@ -569,6 +607,12 @@ window.blobDebug = {
   },
   get effects() {
     return playback.effects;
+  },
+  get alarms() {
+    return alarm.started;
+  },
+  get alarmRinging() {
+    return alarm.ringing;
   },
   get reading() {
     return reader.reading;

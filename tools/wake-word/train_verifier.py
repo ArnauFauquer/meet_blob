@@ -123,6 +123,12 @@ def main() -> None:
                 f"held-out {label:8s} n={len(s):4d}  >=0.5: {np.mean(s >= 0.5):.2f}  "
                 f">=0.35: {np.mean(s >= 0.35):.2f}  median {np.median(s):.3f}"
             )
+    for p in pos:  # the clips to listen to: misses and false accepts
+        if held.get(p, 0.0) < 0.35:
+            print(f"   missed       {held.get(p, 0.0):.3f}  {p}")
+    for p in neg:
+        if held.get(p, 0.0) >= 0.35:
+            print(f"   false accept {held[p]:.3f}  {p}")
 
     sc, lr = fit(clips)
     out = {

@@ -4,7 +4,7 @@
 // belong to a user in the wake group.
 import { expect, test } from '@playwright/test';
 import { micArgs } from './mics';
-import { dbg, openBlob, recv, sent, tracksStopped, waitFor } from './helpers';
+import { alertSource, dbg, needsAlerts, openBlob, recv, sent, tracksStopped, waitFor, waitView } from './helpers';
 
 test.use({ launchOptions: { args: micArgs('hey-blob') } });
 
@@ -42,6 +42,29 @@ test('wake word: "hey blob" sends wake, the turn listens, the VAD ends it, nothi
   expect(ev).toContainEqual(expect.objectContaining({ kind: 'wake_peak', fired: true }));
   expect(ev).toContainEqual(expect.objectContaining({ kind: 'wake_gate', on: false, why: 'turn' }));
   expect(ev).toContainEqual(expect.objectContaining({ kind: 'turn_start', turn: expect.any(Number), how: 'wake' }));
+});
+
+test('wake word with an alert waiting: reads the alert first, acks it, then listens without the wake word', async ({ page, request }) => {
+  test.setTimeout(120_000);
+  needsAlerts();
+  const alerts = alertSource(request);
+  try {
+    await openBlob(page, 'hf-wake');
+    const key = await alerts.post('wake-read', { source: 'timer' }); // before the wake model is ready
+    await waitView(page, 'alert');
+    let l = await waitFor(page, (l) => sent(l, 'alert_read').length > 0, 'alert_read on the wake word');
+    expect(sent(l, 'alert_read')[0].data).toEqual({ type: 'alert_read', key });
+    expect(sent(l, 'wake'), 'no turn before the alert is read').toHaveLength(0);
+    l = await waitFor(page, (l) => sent(l, 'alert_ack').length > 0, 'alert_ack after it was read');
+    const ack = sent(l, 'alert_ack')[0];
+    l = await waitFor(page, (l) => sent(l, 'wake').length > 0, 'listens after the read');
+    const wake = sent(l, 'wake')[0];
+    expect(wake.data, 'no wake word needed').toEqual({ type: 'wake', followup: true });
+    expect(wake.t).toBeGreaterThanOrEqual(ack.t);
+    expect(await dbg(page, 'turnKind')).toBe('followup');
+  } finally {
+    await alerts.cleanup();
+  }
 });
 
 test('wake clips: an attempt sends its audio when the server keeps debug audio', async ({ page }) => {

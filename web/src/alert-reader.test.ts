@@ -8,6 +8,7 @@ function setup(playOk = true) {
     send: (m: ClientMessage) => (sent.push(m), true),
     play: vi.fn(() => Promise.resolve(playOk)),
     beep: vi.fn(),
+    read: vi.fn(),
   };
   return { r: new AlertReader(deps), sent, deps };
 }
@@ -26,8 +27,11 @@ describe('AlertReader (alert tap row)', () => {
     expect(deps.play).toHaveBeenCalledWith(WAV);
     await vi.runAllTicks();
     expect(sent).toHaveLength(1); // still playing: no ack yet
+    expect(deps.read).not.toHaveBeenCalled();
     r.onPlaybackIdle();
     expect(sent[1]).toEqual({ type: 'alert_ack', key: 't1' });
+    expect(deps.read).toHaveBeenCalledWith('t1'); // after the ack, with the reader free again
+    expect(r.reading).toBe(false);
     expect(r.reading).toBe(false);
     expect(deps.beep).not.toHaveBeenCalled();
   });
@@ -50,6 +54,7 @@ describe('AlertReader (alert tap row)', () => {
     r.read('t1');
     vi.advanceTimersByTime(ALERT_READ_TIMEOUT_MS);
     expect(deps.beep).toHaveBeenCalledTimes(1);
+    expect(deps.read).not.toHaveBeenCalled();
     expect(sent).toHaveLength(1);
     expect(r.reading).toBe(false);
   });
@@ -58,6 +63,7 @@ describe('AlertReader (alert tap row)', () => {
     r.read('t1');
     r.onError({ type: 'error', code: 'bad_message' });
     expect(deps.beep).toHaveBeenCalledTimes(1);
+    expect(deps.read).not.toHaveBeenCalled(); // failed reads do not count as read
     r.onPlaybackIdle(); // the beep ends
     expect(sent).toHaveLength(1);
     r.read('t1');

@@ -7,6 +7,7 @@ export interface AlertReaderDeps {
   send(msg: ClientMessage): boolean;
   play(wav: ArrayBuffer): Promise<boolean>; // false when the WAV could not be played
   beep(): void;
+  read?(key: string): void; // the alert was read through and acked
 }
 
 // The alert tap row (design, Alerts and timers): alert_read, play the returned
@@ -58,8 +59,10 @@ export class AlertReader {
   // Local playback became empty.
   onPlaybackIdle(): void {
     if (this.key === null || !this.playingAudio) return;
-    this.d.send({ type: 'alert_ack', key: this.key });
+    const key = this.key;
+    this.d.send({ type: 'alert_ack', key });
     this.finish();
+    this.d.read?.(key);
   }
 
   // Socket dropped: forget the read, the alert stays.
