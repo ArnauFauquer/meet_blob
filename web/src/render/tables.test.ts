@@ -13,8 +13,12 @@ describe('alert table', () => {
     expect(ur).toBeGreaterThan(ug);
     expect(alertLook('info').color).toEqual(ALERT_COLOR.info);
   });
-  it('urgent pulses at twice the rate of info', () => {
-    expect(alertLook('urgent').breathHz).toBeCloseTo(alertLook('info').breathHz * 2);
+  it('urgent breathes a little faster than info, both as calm as the other states', () => {
+    expect(alertLook('urgent').breathHz).toBeGreaterThan(alertLook('info').breathHz);
+    for (const u of ['info', 'urgent'] as const) {
+      expect(alertLook(u).breathHz).toBeLessThanOrEqual(STATE_LOOK.thinking.breathHz);
+      expect(alertLook(u).breath).toBeLessThanOrEqual(STATE_LOOK.thinking.breath);
+    }
   });
   it('returns a copy, so the renderer can ease it in place', () => {
     alertLook('info').color[0] = 9;
