@@ -62,7 +62,7 @@ Environment the chart must provide:
 |----------|--------|
 | `HERMES_URL` | values (`http://hermes-agent.hermes-agent.svc.cluster.local:8642`) |
 | `HERMES_MODEL` | values (`hermes-agent`) |
-| `TZ` | values (`Europe/Madrid`; quiet hours are local time) |
+| `TZ` | values (`Europe/Madrid`; quiet hours and recurring alerts are local time; must be an IANA zone name) |
 | `PUBLIC_URL` | values (`https://blob.faukinator.com`) |
 | `OIDC_ISSUER` | values (Pocket ID's public URL, the browser must reach the same URL) |
 | `OIDC_CLIENT_ID` | values (from the Pocket ID client) |

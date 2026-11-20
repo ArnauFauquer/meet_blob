@@ -15,12 +15,14 @@ home network.
 
 | Request | Response |
 | --- | --- |
-| `POST /alerts` with a JSON body (below) | 201 for a new key, 200 for an existing key. Body `{key, state, fire_at}` |
-| `GET /alerts` | 200, an array of `{key, state, fire_at}`: every row, in any state |
+| `POST /alerts` with a JSON body (below) | 201 for a new key, 200 for an existing key. Body `{key, state, fire_at, repeat}` |
+| `GET /alerts` | 200, an array of `{key, state, fire_at, repeat}`: every row, in any state |
 | `DELETE /alerts/{key}` | 204, also when the key does not exist (idempotent) |
 
 `state` is `pending` (a timer that has not fired), `active` (on screen) or `acked` (someone
-tapped it and heard it). `fire_at` is UTC epoch seconds, or `null`.
+tapped it and heard it). `fire_at` is UTC epoch seconds, or `null`. `repeat` is the rule of a
+recurring alert in its canonical form, or `null` for a one-off alert
+([Recurring alerts](#recurring-alerts-repeat)).
 
 ## `POST /alerts` body
 
@@ -33,7 +35,8 @@ tapped it and heard it). `fire_at` is UTC epoch seconds, or `null`.
 | `lang` | no | Language of `text` for the voice: `es` (default), `en`, `ca` (spoken with the Spanish voice) |
 | `fire_at` | no | When it fires: epoch seconds, or RFC3339 with an offset (`2026-11-12T19:30:00+01:00`, `...Z`). A time without an offset gets 422 |
 | `in_s` | no | Seconds from now, computed with Blob's clock. Use this for timers |
-| `ttl_s` | no | 1 to 10⁹. Delete the alert this many seconds after it becomes active |
+| `ttl_s` | no | 1 to 10⁹. Delete the alert this many seconds after it becomes active (a recurring alert waits for its next time instead) |
+| `repeat` | no | Ring again and again: `daily HH:MM`, `weekly DAYS HH:MM` or `every N days HH:MM`, in Blob's local time. See [Recurring alerts](#recurring-alerts-repeat) |
 
 Any other field gets 422, so a typo (such as `fire_in`) cannot make an alert fire at once.
 
@@ -58,6 +61,54 @@ by `DELETE`, when `ttl_s` runs out (counted from activation), or 24 h after they
 Restart: alerts are stored in SQLite and survive a restart of the service. A timer that came due
 while the service was down fires once at startup, marked `late`, unless its `ttl_s` had also run
 out (then it is deleted).
+
+## Recurring alerts (`repeat`)
+
+A recurring alert rings at the same local time again and again: the pills every day at 9, the
+bins on Tuesdays, the plants every 4 days. The source creates it once; Blob puts it back to
+`pending` for the next time after each ring. It ends only with `DELETE /alerts/{key}`.
+
+### Format
+
+Lowercase, one space between the parts, a 24-hour `HH:MM` (two digits each) at the end:
+
+| `repeat` | Rings |
+| --- | --- |
+| `daily 09:00` | every day at 09:00 |
+| `weekly tue 20:00` | every Tuesday at 20:00 |
+| `weekly mon,thu 08:30` | every Monday and Thursday at 08:30. Days: `mon tue wed thu fri sat sun`, comma-separated, no spaces, no repeats, any order |
+| `every 4 days 10:00` | every 4th day at 10:00. `N` is 2 to 365 (use `daily` for 1), without a leading zero |
+
+Anything else gets 422: `daily 9:00`, `Daily 09:00`, `weekly martes 20:00`, `every 1 days
+10:00`, `monthly ...`. The responses give the rule back in canonical form (`weekly thu,mon 08:30`
+comes back as `weekly mon,thu 08:30`); compare against that.
+
+The time is wall-clock time in Blob's zone, `TZ` (the chart sets `Europe/Madrid`, which is also
+the default). "09:00" stays 09:00 after a clock change, in spring and in autumn. On the
+spring-forward night a time between 02:00 and 02:59 does not exist; it rings at the same instant
+the clock jumps past, one hour later. A time that happens twice on the autumn night rings once,
+the first time. A source never deals with UTC offsets for a recurring alert.
+
+### Rules
+
+| Case | Result |
+| --- | --- |
+| `repeat` with no `fire_at` | `pending` at the next matching time after now (09:00 today if it is 08:00, else tomorrow) |
+| `repeat` with `fire_at` (epoch or RFC3339 with an offset) | `fire_at` is the start: the first ring is the first matching time at or after it ("starting Saturday"). For `every N days` it also fixes the days: a past start keeps counting from it |
+| `repeat` with `in_s` | 422 |
+| A recurring alert is never `active` on the POST | It always starts `pending`, even when `fire_at` is in the past |
+| The scheduler reaches the time | `active`, like any alert (snapshot, chime) |
+| Someone taps it and hears it (`alert_ack`) | `pending` at its next time, not `acked`. `GET /alerts` shows the new `fire_at` |
+| Its `ttl_s` runs out while it is `active` | `pending` at its next time, not deleted |
+| Nobody taps it | It stays `active` on the screen. The times that pass meanwhile do not stack or ring again; after the tap it waits for the next time after now. Give it a `ttl_s` if it should go away and ring fresh next time |
+| Same `key`, same `text`, `urgency` and `repeat` (and the same start) | ignored (200, the current row). A ringing alert keeps ringing. A source can re-send it every day |
+| Same `key`, anything of that changed | the row is replaced: `pending` at the new rule's next time (a ringing alert stops ringing) |
+| Same `key` without `repeat` | a one-off alert from then on, with the normal rules |
+| Blob was down when it was due | it rings once at startup, marked `late`, for the last time that was missed, unless its `ttl_s` had also run out (then it waits for its next time) |
+| `source: "timer"` | allowed, but no countdown is shown for it |
+
+Lifetime: a recurring row stays until `DELETE`; it is never `acked`, so the 24 h clean-up of acked
+rows does not touch it.
 
 What the page does with it: every connected screen gets a new snapshot within about 1 s. The top
 alert is `urgent` before `info`, then oldest first. During a conversation turn the alert is held
@@ -85,8 +136,32 @@ curl -sS -X POST "$BLOB/alerts" -H "$AUTH" -H 'Content-Type: application/json' \
   -d '{"key": "cal-dentist", "source": "calendar", "fire_at": "2026-11-20T09:30:00+01:00",
        "ttl_s": 3600, "text": "Dentist at ten.", "lang": "en"}'
 
-curl -sS "$BLOB/alerts" -H "$AUTH"                       # list
+# The pills every day at nine (pending until 09:00, back to pending after each tap)
+curl -sS -X POST "$BLOB/alerts" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"key": "repeat-pastillas", "source": "reminder", "urgency": "urgent",
+       "repeat": "daily 09:00", "text": "Toca tomar las pastillas.", "lang": "es"}'
+# -> {"key":"repeat-pastillas","state":"pending","fire_at":1795161600,"repeat":"daily 09:00"}   (asked on 2026-11-20 before nine)
+
+# The bins on Tuesday evenings, gone after two hours if nobody taps it
+curl -sS -X POST "$BLOB/alerts" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"key": "repeat-basura", "source": "reminder", "repeat": "weekly tue 20:00",
+       "ttl_s": 7200, "text": "Hoy hay que sacar la basura.", "lang": "es"}'
+
+# Water the plants every 4 days at ten, starting on Saturday
+curl -sS -X POST "$BLOB/alerts" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"key": "repeat-plantas", "source": "reminder", "repeat": "every 4 days 10:00",
+       "fire_at": "2026-11-21T00:00:00+01:00", "text": "Toca regar las plantas.", "lang": "es"}'
+
+# A bad rule is refused
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$BLOB/alerts" -H "$AUTH" \
+  -H 'Content-Type: application/json' \
+  -d '{"key": "x", "source": "reminder", "repeat": "every day at 9", "text": "x"}'
+# -> 422
+
+curl -sS "$BLOB/alerts" -H "$AUTH"                       # list (recurring rows have a repeat)
+curl -sS "$BLOB/alerts" -H "$AUTH" | jq '.[] | select(.repeat)'   # only the recurring ones
 curl -sS -X DELETE "$BLOB/alerts/garage-door" -H "$AUTH" # clear (204)
+curl -sS -X DELETE "$BLOB/alerts/repeat-pastillas" -H "$AUTH"    # stop a recurring one (204)
 ```
 
 ## Home Assistant `rest_command`
@@ -153,7 +228,8 @@ Blob appends it to the system message of every request to Hermes, with `{alerts_
 `HERMES_ALERTS_URL` and the current local time added (for reminders at a time of day). Nothing is
 installed in Hermes, so a new Blob version updates the skill on its next turn. It tells Hermes what
 Blob is (replies are spoken), and how to set, list and cancel timers, reminders and notices with
-`curl`.
+`curl`, including recurring reminders ("recuérdame las pastillas cada día a las 9", "¿qué
+recordatorios tengo?", "ya no tomo esa pastilla").
 
 The one thing Hermes needs on its side is the token: the environment variable
 `BLOB_ALERT_TOKEN` (Blob's `ALERT_TOKEN`) in the Hermes pod. In home_lab, Terraform writes it to
