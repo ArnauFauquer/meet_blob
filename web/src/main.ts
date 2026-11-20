@@ -4,6 +4,7 @@ import { Capture } from './audio/capture';
 import { ALARM_SOUNDS, Alarm, ChimeRules, pickRing } from './audio/chime';
 import { msToSamples, samplesToMs } from './audio/pcm';
 import { Playback } from './audio/playback';
+import { AdaptiveVolume, volumeOptions } from './audio/volume';
 import {
   DEFAULT_DEVICE_CONFIG,
   PAGE_VERSION,
@@ -21,7 +22,7 @@ import { CLOCK_AFTER_MS, CLOCK_TURN_MS, WEATHER_TURN_MS, type Sky } from './rend
 import { computeView, overlayActive, setsOverlay, timerText, topAlert, turnActive, type View } from './state';
 import { decideTap } from './taps';
 import { TurnClient, type TurnDeps } from './turn-client';
-import { VadController } from './vad';
+import { NEGATIVE, VadController } from './vad';
 import type { Detector, WakeConfig } from './wake/detector';
 import { PcmRing, PhraseSegmenter, ScoreHistory } from './wake/clips';
 import { FollowUp, gateReason, wakeAllowed } from './wake/wake-gate';
@@ -105,6 +106,7 @@ function logMic(): void {
     type: 'client_event',
     kind: 'mic',
     ...mic.take(),
+    volume: volume.state(),
     ctx: ctx.state,
     rate: ctx.sampleRate,
     visible: document.visibilityState,
@@ -114,6 +116,19 @@ function logMic(): void {
 }
 const followup = new FollowUp();
 const vad = new VadController(() => detector?.reset(false, true));
+
+// Adaptive volume (audio/volume.ts): softer at night, louder over a noisy room.
+const volume = new AdaptiveVolume(
+  {
+    quietForMs: () => playback.quietForMs(),
+    speech: () => vad.active && vad.lastP >= NEGATIVE,
+    night: () => (deviceConfig as { night?: unknown }).night,
+    log: (e) => sock.send({ type: 'client_event', kind: 'volume', ...e }),
+  },
+  volumeOptions(location.search),
+);
+playback.gainFor = (kind) => volume.gain(kind);
+capture.onBlock = (pcm) => volume.hear(pcm);
 
 // Audio is locked until a user gesture lets the AudioContext run.
 const audioLocked = () => ctx.state !== 'running';
@@ -574,6 +589,7 @@ const diag = new Diag($('diag'), () => ({
     : 'off (tap only)',
   vad: turnDeps.vad ? { listening: vad.active, p: +vad.lastP.toFixed(2) } : 'off',
   presence: { present: presence.present, screen: presence.screen(performance.now(), idleSince, view() === 'idle') },
+  volume: volume.state(),
 }));
 
 onPress(document.body, onTap, () => diag.show());
@@ -663,6 +679,9 @@ window.blobDebug = {
   },
   get effects() {
     return playback.effects;
+  },
+  get volume() {
+    return volume.state();
   },
   get alarms() {
     return alarm.started;
