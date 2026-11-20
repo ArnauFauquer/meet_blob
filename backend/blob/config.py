@@ -2,6 +2,7 @@
 
 import re
 from typing import Literal, Self
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -67,6 +68,9 @@ class Settings(BaseSettings):
     # S4: the local timer rule before Hermes (on/off). Turn it off once Hermes creates timers
     # itself through POST /alerts.
     timer_rule: bool = True
+    # Recurring alerts: the IANA zone their "HH:MM" is in. Read from TZ, which the chart already
+    # sets for the container; glibc's ":Europe/Madrid" form is accepted.
+    tz: str = "Europe/Madrid"
 
     # Idle screen weather (Open-Meteo, no key). Off unless both are set.
     weather_lat: float | None = Field(None, ge=-90, le=90)
@@ -112,6 +116,16 @@ class Settings(BaseSettings):
                     f"{', '.join(missing)} required (or AUTH_DISABLED=1 for local dev)"
                 )
         return self
+
+    @field_validator("tz")
+    @classmethod
+    def _tz(cls, v: str) -> str:
+        v = v.removeprefix(":")
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError("TZ must be an IANA zone name such as Europe/Madrid") from None
+        return v
 
     @field_validator("quiet_hours")
     @classmethod

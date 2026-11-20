@@ -419,7 +419,7 @@ def test_alert_read_then_ack(client: TestClient) -> None:
         ws.send_json({"type": "ping"})
         assert recv(ws) == {"type": "pong"}
     rows = client.get("/alerts", headers={"Authorization": f"Bearer {ALERT_TOKEN}"}).json()
-    assert rows == [{"key": "wash", "state": "acked", "fire_at": None}]
+    assert rows == [{"key": "wash", "state": "acked", "fire_at": None, "repeat": None}]
 
 
 def test_alert_read_uses_voice_for_lang(app_factory: Any) -> None:

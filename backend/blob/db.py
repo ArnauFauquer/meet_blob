@@ -9,9 +9,9 @@ from typing import TypedDict
 
 from .schemas import Timings
 
-# 1: turns (S1). 2: alerts (S4). 3: sign-in sessions. A new version only adds tables or columns,
-# so an older image still opens a newer file.
-SCHEMA_VERSION = 3
+# 1: turns (S1). 2: alerts (S4). 3: sign-in sessions. 4: alerts.repeat (recurring alerts).
+# A new version only adds tables or columns, so an older image still opens a newer file.
+SCHEMA_VERSION = 4
 
 _TURNS = """
 CREATE TABLE IF NOT EXISTS turns (
@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS alerts (
     late INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     activated_at INTEGER,
-    acked_at INTEGER
+    acked_at INTEGER,
+    repeat TEXT
 )
 """
 _SESSIONS = """
@@ -74,7 +75,10 @@ ALERT_COLUMNS = (
     "created_at",
     "activated_at",
     "acked_at",
+    "repeat",
 )
+# Columns added after their table was created: (table, column, SQL type).
+_ADDED_COLUMNS = (("alerts", "repeat", "TEXT"),)
 
 
 class Db:
@@ -87,6 +91,10 @@ class Db:
             self._conn.execute(_TURNS)
             self._conn.execute(_ALERTS)
             self._conn.execute(_SESSIONS)
+            for table, column, kind in _ADDED_COLUMNS:
+                have = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+                if column not in have:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
             # A newer file keeps its version: later versions only add tables or columns.
             if self.user_version() < SCHEMA_VERSION:
                 self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

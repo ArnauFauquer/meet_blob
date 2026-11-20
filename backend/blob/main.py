@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Annotated, Any, Protocol
+from zoneinfo import ZoneInfo
 
 import httpx
 import numpy as np
@@ -148,7 +149,9 @@ def create_app(
                 settings.debug_audio_keep,
                 settings.debug_audio_dir,
             )
-        st.alerts = st.hub.alerts = Alerts(st.db, st.hub.broadcast_snapshot, wall)
+        st.alerts = st.hub.alerts = Alerts(
+            st.db, st.hub.broadcast_snapshot, wall, ZoneInfo(settings.tz)
+        )
         await st.alerts.load()  # overdue timers fire once, marked late
         st.hub.turns = TurnManager(
             stt=stt,

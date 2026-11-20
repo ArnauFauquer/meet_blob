@@ -19,6 +19,8 @@ from pydantic import (
     model_validator,
 )
 
+from . import repeat as repeat_rule
+
 
 class ConvState(StrEnum):
     IDLE = "idle"
@@ -234,6 +236,14 @@ class AlertIn(BaseModel):
     fire_at: StrictInt | StrictFloat | str | None = None
     in_s: StrictInt | StrictFloat | None = Field(default=None, ge=-MAX_SPAN_S, le=MAX_SPAN_S)
     ttl_s: int | None = Field(default=None, gt=0, le=MAX_SPAN_S)
+    # Recurring: "daily 09:00", "weekly tue 20:00", "every 4 days 10:00" (blob/repeat.py). Stored
+    # in its canonical form. fire_at, if given, is the earliest the first occurrence may be.
+    repeat: str | None = Field(default=None, max_length=64)
+
+    @field_validator("repeat")
+    @classmethod
+    def _repeat(cls, v: str | None) -> str | None:
+        return None if v is None else str(repeat_rule.parse(v))
 
     @field_validator("fire_at")
     @classmethod
@@ -256,6 +266,8 @@ class AlertIn(BaseModel):
     def _one_time(self) -> Self:
         if self.fire_at is not None and self.in_s is not None:
             raise ValueError("give fire_at or in_s, not both")
+        if self.repeat is not None and self.in_s is not None:
+            raise ValueError("repeat takes fire_at (the start) or nothing, not in_s")
         return self
 
 
@@ -263,3 +275,4 @@ class AlertOut(BaseModel):
     key: str
     state: AlertState
     fire_at: int | None
+    repeat: str | None = None  # the canonical rule of a recurring alert
