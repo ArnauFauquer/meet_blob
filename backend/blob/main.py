@@ -34,6 +34,7 @@ from .gpu import Gpu
 from .hermes import HermesClient
 from .hub import Hub
 from .presence import Presence
+from .rain_soon import RainWatch
 from .stt import SttResult, WhisperStt
 from .tts import KokoroTts
 from .turn import TurnManager
@@ -96,6 +97,7 @@ def create_app(
     hermes_transport: httpx.AsyncBaseTransport | None = None,
     oidc_transport: httpx.AsyncBaseTransport | None = None,
     weather_transport: httpx.AsyncBaseTransport | None = None,
+    rain_transport: httpx.AsyncBaseTransport | None = None,
     wall: Callable[[], float] = time.time,
 ) -> FastAPI:
     stt, tts = models or _models(settings)
@@ -179,6 +181,23 @@ def create_app(
         ]
         if st.weather:
             tasks.append(asyncio.create_task(st.weather.run()))
+        st.rain = (
+            RainWatch(
+                st.weather.lat,
+                st.weather.lon,
+                st.alerts,
+                lead_min=settings.rain_soon_lead_min,
+                quiet=settings.rain_soon_quiet,
+                model=settings.rain_soon_model,
+                lang=settings.rain_soon_lang,
+                transport=rain_transport,
+                wall=wall,
+            )
+            if st.weather and settings.rain_soon
+            else None
+        )
+        if st.rain:
+            tasks.append(asyncio.create_task(st.rain.run()))
         try:
             yield
         finally:
@@ -191,6 +210,8 @@ def create_app(
             await st.oidc.aclose()
             if st.weather:
                 await st.weather.aclose()
+            if st.rain:
+                await st.rain.aclose()
             st.db.close()
 
     app = FastAPI(title="Blob", lifespan=lifespan)

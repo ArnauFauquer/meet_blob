@@ -109,6 +109,7 @@ def app_factory(
         models: tuple[Any, Any] | None = None,
         wall: Callable[[], float] = time.time,
         weather_transport: httpx.AsyncBaseTransport | None = None,
+        rain_transport: httpx.AsyncBaseTransport | None = None,
         **overrides: Any,
     ) -> FastAPI:
         s = make_settings(tmp_path, **overrides)
@@ -124,6 +125,7 @@ def app_factory(
             hermes_transport=hermes_transport,
             oidc_transport=pocket_id.transport(),
             weather_transport=weather_transport,
+            rain_transport=rain_transport or weather_transport,
             wall=wall,
         )
 
