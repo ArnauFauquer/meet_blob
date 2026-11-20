@@ -161,8 +161,15 @@ export function clockDigits(d: Date): [number, number, number, number] {
 }
 
 // Alert source to shape. Slice 4: timer is a triangle, every other source a square.
-export const SOURCE_SHAPE: Record<string, ShapeId> = { timer: SHAPE.triangle };
+// Rain soon (source `rain`, docs/rain.md) is the idle sky's rain cloud, its drops falling below.
+export const SOURCE_SHAPE: Record<string, ShapeId> = { timer: SHAPE.triangle, rain: SHAPE.weather };
 export const DEFAULT_ALERT_SHAPE: ShapeId = SHAPE.square;
+
+// Alerts drawn as a sky: the sky they show.
+const ALERT_SKY: Record<string, Sky> = { rain: { kind: 'rain', day: true } };
+export function alertSky(source: string): Sky | null {
+  return ALERT_SKY[source] ?? null;
+}
 
 export const ALERT_COLOR: Record<Urgency, [number, number, number]> = {
   info: [0.1, 0.85, 0.28], // green
@@ -189,9 +196,13 @@ const ALERT_FACE: Record<Urgency, Face> = {
   urgent: { ...FACE, eyeW: 0.13, eyeH: 0.15, smile: 0.4, mouth: 0.045 },
 };
 
-export function alertLook(urgency: Urgency): Look {
+// An alert drawn as a sky keeps the alert's colour (so it reads as something to tap, not as the
+// idle weather) and wears that sky's face: the rain cloud looks up at its drops.
+export function alertLook(urgency: Urgency, source = ''): Look {
   const breathHz = urgency === 'urgent' ? INFO_PULSE_HZ * URGENT_PULSE_FACTOR : INFO_PULSE_HZ;
-  return { ...ALERT_MOTION, ...ALERT_FACE[urgency], color: [...ALERT_COLOR[urgency]], lava: [...ALERT_LAVA[urgency]], breathHz };
+  const sky = alertSky(source);
+  const face = sky ? { ...FACE, ...WEATHER_COLOR[sky.kind][2] } : ALERT_FACE[urgency];
+  return { ...ALERT_MOTION, ...face, color: [...ALERT_COLOR[urgency]], lava: [...ALERT_LAVA[urgency]], breathHz };
 }
 
 // Lava lobes for the shader (uLobes): centre in units of the blob radius and

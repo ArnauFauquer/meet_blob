@@ -3,7 +3,7 @@
 import { expect, test } from '@playwright/test';
 import { type LogEntry, alertSource, dbg, external, log, mockOnly, needsAlerts, openBlob, recv, sent, shape, speak, tap, waitFor, waitView } from './helpers';
 
-const SHAPE = { sphere: 0, triangle: 1, square: 2 };
+const SHAPE = { sphere: 0, triangle: 1, square: 2, weather: 4 };
 let alerts: ReturnType<typeof alertSource>;
 
 test.beforeEach(({ request }) => {
@@ -39,6 +39,21 @@ test('an alert appears: timer triangle in green (info), then calendar square in 
   // cleared: back to the sphere
   await alerts.del(c);
   await alerts.del(t);
+  await waitView(page, 'idle');
+  await settledShape(page, SHAPE.sphere);
+});
+
+test('rain soon: the green rain cloud (weather shape), no text on screen', async ({ page }) => {
+  await openBlob(page, 'e2e-alert-rain');
+  await waitView(page, 'idle');
+  const r = await alerts.post('rain-soon-test', { source: 'rain', urgency: 'info', text: 'Empieza a llover en 20 minutos.' });
+  await waitView(page, 'alert');
+  expect(await dbg(page, 'topAlert')).toBe(r);
+  await settledShape(page, SHAPE.weather);
+  await expect.poll(async () => greenish((await shape(page))!.color), { message: 'green colour uniform' }).toBe(true);
+  await expect(page.locator('#weather')).not.toHaveClass(/\bon\b/); // the forecast strip stays away
+  expect(await page.locator('body').innerText()).not.toContain('llover');
+  await alerts.del(r);
   await waitView(page, 'idle');
   await settledShape(page, SHAPE.sphere);
 });
