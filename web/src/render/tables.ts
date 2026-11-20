@@ -154,19 +154,21 @@ export const ALERT_LAVA: Record<Urgency, [number, number, number]> = {
   info: [0.45, 1.0, 0.3],
   urgent: [1.0, 0.32, 0.1],
 };
-export const INFO_PULSE_HZ = 0.45;
-export const URGENT_PULSE_FACTOR = 2; // urgent pulses at twice the rate of info
+// A slow, deep breath like the other states (idle breathes at 0.16 Hz): the
+// colour and the shape say "look at me", the motion stays calm.
+export const INFO_PULSE_HZ = 0.22;
+export const URGENT_PULSE_FACTOR = 1.5; // urgent breathes a little faster than info
 
-const ALERT_MOTION = { speed: 0.3, amp: 0.09, breath: 0.07, levelGain: 0.6, glow: 1.1, bright: 1.05 };
+const ALERT_MOTION = { speed: 0.24, amp: 0.09, breath: 0.035, levelGain: 0.6, glow: 1.1, bright: 1.05 };
 
 export function alertShape(source: string): ShapeId {
   return SOURCE_SHAPE[source] ?? DEFAULT_ALERT_SHAPE;
 }
 
-// Info is a content face; urgent is surprised: round eyes, open mouth.
+// Info is a content face; urgent is attentive: round eyes, a small "oh".
 const ALERT_FACE: Record<Urgency, Face> = {
   info: { ...FACE, eyeW: 0.12, eyeH: 0.17 },
-  urgent: { ...FACE, eyeW: 0.14, eyeH: 0.14, smile: 0, mouth: 0.13 },
+  urgent: { ...FACE, eyeW: 0.13, eyeH: 0.15, smile: 0.4, mouth: 0.045 },
 };
 
 export function alertLook(urgency: Urgency): Look {

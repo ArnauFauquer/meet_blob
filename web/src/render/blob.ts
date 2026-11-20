@@ -56,7 +56,7 @@ const rnd = (n: number, k: number) => (Math.sin(n * 91.345 + k * 47.853) * 43758
 
 // Body motion (character): a squash-and-stretch spring that every landing,
 // state change and minute tick kicks, a hop and a full twirl during a shape
-// morph, bounces with the alert pulse and a gentle float for the clock.
+// morph, a slow float with the alert's breath and a gentle float for the clock.
 const SQUASH_HZ = 2.6;
 const SQUASH_DAMP = 0.22; // damping ratio: a few visible jiggles
 const HOP = 0.22; // morph hop height (the blob radius is 0.78)
@@ -169,8 +169,7 @@ export class BlobRenderer {
   private readonly shear = new Matrix3();
   private readonly scale = new Matrix3();
   private readonly inv = new Matrix3();
-  private alertW = 0; // 0..1 weight of the alert bounce
-  private urgentW = 0; // 0..1 weight of the urgent tremble
+  private alertW = 0; // 0..1 weight of the alert float
   private clockW = 0; // 0..1 weight of the clock float
   private restW = 0; // 0..1 weight of a resting shape (clock or sky)
   private restY = 0; // resting shape: eased offset and scale that fit it above FrameInput.room
@@ -309,7 +308,6 @@ export class BlobRenderer {
     this.blinkN = 1;
     Object.assign(this, { t: 0, squash: { x: 0, v: 0 }, twirl: newTwirl(), lastView: view, actor: new Actor(), actW: 0, moodW: 0, held: rest(), lean: 0, leanV: 0, lastX: 0, lastVx: 0 });
     this.alertW = isAlertShape(shape) ? 1 : 0;
-    this.urgentW = alert?.urgency === 'urgent' && view === 'alert' ? 1 : 0;
     this.clockW = shape === SHAPE.clock ? 1 : 0;
     this.restW = shape === SHAPE.clock || shape === SHAPE.weather ? 1 : 0;
     this.restY = 0;
@@ -358,7 +356,6 @@ export class BlobRenderer {
     const { level } = fi;
     const { look: target, shape } = targetOf(fi);
     const wasMorphing = this.morph.a !== this.morph.b;
-    const phase0 = this.material.uniforms.uPhase.value as number;
     stepMorph(this.morph, shape, dt);
     const k = 1 - Math.exp(-dt / EASE_S);
     const c = this.cur;
@@ -417,7 +414,7 @@ export class BlobRenderer {
     this.stepMouth(dt, fi, c);
     this.stepSky(dt, fi);
     lobes(u.uFlow.value as number, c.amp, u.uLobes.value as Float32Array);
-    this.animateBody(dt, fi, shape, wasMorphing, phase0);
+    this.animateBody(dt, fi, shape, wasMorphing);
   }
 
   // The mouth. Speaking, a fast envelope of the playback level opens it on
@@ -490,14 +487,13 @@ export class BlobRenderer {
   }
 
   // Character on top of the look: squash and stretch, the morph hop and
-  // twirl, the alert bounce and tremble, the clock float and eye glances.
-  private animateBody(dt: number, fi: FrameInput, shape: number, wasMorphing: boolean, phase0: number): void {
+  // twirl, the alert and clock floats and eye glances.
+  private animateBody(dt: number, fi: FrameInput, shape: number, wasMorphing: boolean): void {
     const u = this.material.uniforms;
     const m = this.morph;
     const t = (this.t += dt);
     const k = 1 - Math.exp(-dt / 0.3);
     this.alertW += ((isAlertShape(shape) ? 1 : 0) - this.alertW) * k;
-    this.urgentW += ((fi.view === 'alert' && fi.alert?.urgency === 'urgent' ? 1 : 0) - this.urgentW) * k;
     this.clockW += ((shape === SHAPE.clock ? 1 : 0) - this.clockW) * k;
     this.restW += ((shape === SHAPE.clock || shape === SHAPE.weather ? 1 : 0) - this.restW) * k;
     // The resting shape centres itself in the free space above the strip and
@@ -518,11 +514,6 @@ export class BlobRenderer {
     if (!morphing && wasMorphing) this.kick(-4);
     if (this.lastView !== null && fi.view !== this.lastView && !morphing) this.kick(-1.6);
     this.lastView = fi.view;
-    // Alert shapes jump with the pulse (sin > 0 is the air time) and land on its zero crossing.
-    const phase = u.uPhase.value as number;
-    const landed = Math.sin(phase0) > 0 && Math.sin(phase) <= 0;
-    if (landed && this.alertW > 0.5) this.kick(-2.6 - 1.2 * this.urgentW);
-
     spring(this.squash, 0, SQUASH_HZ, SQUASH_DAMP, dt);
 
     // Morph: hop and stretch in the air, and one full twirl.
@@ -546,13 +537,12 @@ export class BlobRenderer {
     this.actW += ((this.actor.busy ? 1 : 0) - this.actW) * (1 - Math.exp(-dt / 0.2));
     const calm = 1 - this.actW; // the ambient motion yields to an act
 
-    const bounce = Math.max(0, Math.sin(phase)) * calm;
-    const hop = HOP * air + this.alertW * (0.1 - 0.03 * this.urgentW) * bounce + this.restW * (0.035 * Math.sin(t * 0.8) + this.restY) + p.y;
-    const shake = this.urgentW * calm * (0.011 * Math.sin(t * 47) + 0.007 * Math.sin(t * 31 + 1.3));
-    const x = shake + p.x;
+    // Alert shapes rise softly as they breathe in and sink as they breathe out.
+    const rise = this.alertW * 0.035 * Math.sin(u.uPhase.value as number) * calm;
+    const hop = HOP * air + rise + this.restW * (0.035 * Math.sin(t * 0.8) + this.restY) + p.y;
+    const x = p.x;
     (u.uBodyPos.value as Vector3).set(x, hop, p.z);
-    const roll =
-      (this.alertW * 0.09 * Math.sin(t * 1.3) * (1 - 0.5 * this.urgentW) + this.urgentW * 0.03 * Math.sin(t * 39) + this.clockW * 0.035 * Math.sin(t * 0.53)) * calm + p.roll;
+    const roll = (this.alertW * 0.05 * Math.sin(t * 0.6) + this.clockW * 0.035 * Math.sin(t * 0.53)) * calm + p.roll;
     const yaw = this.twirl.angle + this.clockW * 0.14 * Math.sin(t * 0.37) * calm + p.yaw;
 
     // Jelly lean: the top lags behind sideways moves, on its own spring.
@@ -571,7 +561,7 @@ export class BlobRenderer {
 
     // World to body: undo the lean (x - lean * y), then the turn (yaw, pitch,
     // roll), then the squash and stretch at constant volume.
-    const st = 1 + Math.max(-0.3, Math.min(0.35, this.squash.x + 0.16 * air + this.alertW * 0.05 * bounce + p.sq));
+    const st = 1 + Math.max(-0.3, Math.min(0.35, this.squash.x + 0.16 * air + p.sq));
     this.euler.set(p.pitch, yaw, roll, 'YXZ');
     const body = (u.uBody.value as Matrix3).setFromMatrix4(this.rot.makeRotationFromEuler(this.euler)).transpose();
     body.multiply(this.shear.set(1, -this.lean, 0, 0, 1, 0, 0, 0, 1));

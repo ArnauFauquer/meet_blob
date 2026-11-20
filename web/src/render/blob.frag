@@ -162,9 +162,15 @@ float sdRoundBox(vec3 p, vec3 b, float r) {
   return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
 }
 
-// Alert frame: undo the breathing scale and turn with the slow sway.
+// Alert size: the breathing radius, shrunk on a narrow (portrait) screen so
+// the triangle's corners stay inside it even at the far end of the sway.
+float alertScale() {
+  return radius() / uRadius * min(1.0, uRes.x / uRes.y / 0.95);
+}
+
+// Alert frame: undo the alert scale and turn with the slow sway.
 vec3 alertFrame(vec3 p) {
-  p /= radius() / uRadius;
+  p /= alertScale();
   float a = 0.35 * sin(uFlow * 0.6);
   p.xz = rot(a) * p.xz;
   p.yz = mat2(0.98, -0.2, 0.2, 0.98) * p.yz;
@@ -182,7 +188,7 @@ const float VOL_CLOCK = 0.919;
 
 // Both alert shapes at once: (triangle, square). They share the transform and the shimmer.
 vec2 alertShapes(vec3 p) {
-  float s = radius() / uRadius;
+  float s = alertScale();
   p = alertFrame(p);
   // Soft, well rounded bodies (a smaller core, a thick rounding) that still
   // read as a triangle and a square; the lava lobes push bumps out of their

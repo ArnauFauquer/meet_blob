@@ -171,13 +171,6 @@ export const ACTS: Record<string, Act> = {
     kicks: [[0.15, -1.5], [1.4, -1]],
   },
   // Frantic: shakes side to side and hops, eyes wide.
-  panic: {
-    dur: 1.4,
-    pose: (u) => {
-      const env = hold(u, 0, 0.1, 1.1, 1.4);
-      return { x: 0.06 * wave(u, 7) * env, roll: 0.15 * Math.sin(TAU * 7 * u + 0.5) * env, y: 0.06 * Math.abs(wave(u, 3.5)) * env, lid: 0.35 * env, mouth: 0.05 * env };
-    },
-  },
 
   // Thinking: the blob ponders, calculates, gets an idea... (the thinking look
   // already looks up and to the right; these poses add to it).
@@ -272,11 +265,9 @@ export const REPERTOIRE: Record<Mood, { acts: [string, number][]; gap: [number, 
     acts: [['lookLeft', 3], ['lookRight', 3], ['lookAround', 2], ['curious', 2], ['yawn', 1], ['doze', 1], ['wiggle', 1], ['hopHop', 1], ['backflip', 1], ['spinJump', 1], ['peek', 1]],
     gap: [2, 5],
   },
-  info: {
-    acts: [['hopHop', 3], ['wiggle', 2], ['peek', 2], ['backflip', 1], ['spinJump', 1], ['lookLeft', 1], ['lookRight', 1], ['curious', 1]],
-    gap: [1, 3],
-  },
-  urgent: { acts: [['panic', 3], ['peek', 2], ['hopHop', 2], ['spinJump', 1], ['backflip', 1]], gap: [0.5, 1.5] },
+  // Alerts stay calm: small looks and wiggles with long rests, no flips or spins.
+  info: { acts: [['wiggle', 2], ['lookLeft', 2], ['lookRight', 2], ['curious', 2], ['peek', 1]], gap: [4, 8] },
+  urgent: { acts: [['peek', 2], ['curious', 2], ['wiggle', 1], ['lookLeft', 1], ['lookRight', 1]], gap: [3, 6] },
   thinking: {
     acts: [['ponder', 3], ['compute', 3], ['orbit', 2], ['tap', 2], ['lookUp', 2], ['turnIdea', 1], ['strain', 1], ['eureka', 1], ['dizzy', 1]],
     gap: [0.2, 0.9],
