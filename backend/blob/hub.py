@@ -13,6 +13,7 @@ from .alerts import Alerts
 from .audio import PCM_RATE
 from .debugaudio import AudioDump
 from .devices import Device
+from .presence import Presence
 from .schemas import (
     AlertAck,
     AlertRead,
@@ -23,6 +24,7 @@ from .schemas import (
     Hello,
     HelloOk,
     Pong,
+    PresenceMsg,
     Snapshot,
     State,
     Tts,
@@ -72,6 +74,7 @@ class Hub:
         self.turns: TurnManager  # set by main once the turn manager exists
         self.alerts: Alerts  # set by main once the alert store exists
         self.audio_dump: AudioDump | None = None  # DEBUG_AUDIO_DIR: keep utterances as WAV
+        self.presence: Presence | None = None  # set by main; sent on connect once a sensor reported
         self._handlers: dict[str, Handler] = {
             "tap": self._tap,
             "utterance": self._utterance,
@@ -103,6 +106,12 @@ class Hub:
             for c in list(self.clients):
                 await c.send(snap)
 
+    async def broadcast_presence(self, msg: PresenceMsg) -> None:
+        """A presence report from the room's sensor: to every client."""
+        async with self._broadcast_lock:
+            for c in list(self.clients):
+                await c.send(msg)
+
     def _snapshot(self) -> Snapshot:
         return Snapshot(
             conv=self.turns.conv, alerts=self.alerts.items(), timers=self.alerts.timers()
@@ -117,6 +126,8 @@ class Hub:
         self.clients.add(conn)
         try:
             await conn.send(self._snapshot())
+            if self.presence is not None and self.presence.present is not None:
+                await conn.send(self.presence.message())  # no sensor: nothing, as before
             while True:
                 msg = await ws.receive()
                 if msg["type"] == "websocket.disconnect":

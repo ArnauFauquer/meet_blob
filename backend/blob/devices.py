@@ -43,3 +43,6 @@ class DeviceConfig(BaseModel):
     debug_audio: bool = False  # DEBUG_AUDIO_DIR is set: the page may send wake_clip audio
     # Night mode (NIGHT_HOURS): the page dims, slows down and holds info alerts. None: off.
     night: NightHours | None = None
+    # Presence wake: with nobody in the room (POST /presence false) the screen goes dark this long
+    # after the last activity.
+    presence_sleep_s: float = 600

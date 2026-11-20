@@ -162,12 +162,20 @@
     "pong": {
       "slice": "S1",
       "fields": {}
+    },
+    "presence": {
+      "slice": "presence",
+      "fields": {
+        "present": "bool|null (null: unknown, no sensor reported or DELETE /presence; the page behaves as with no sensor)",
+        "since_s": "float|null (seconds since the current value started, when sent)"
+      }
     }
   },
   "http": {
     "GET /device-config": {
       "auth": "session cookie blob_session (set by /auth/callback), 401 otherwise",
-      "response": "{device, sound, wake, quiet_hours, followup_listen_s, listen_no_speech_s, silence_rms, debug_audio, night}; night is {start, end} (HH:MM, browser local time) from NIGHT_HOURS, or null when night mode is off; device is the user's name, sound and wake come from the user's Pocket ID groups (OIDC_SOUND_GROUP, OIDC_WAKE_GROUP)"
+      "response": "{device, sound, wake, quiet_hours, followup_listen_s, listen_no_speech_s, silence_rms, debug_audio, night}; night is {start, end} (HH:MM, browser local time) from NIGHT_HOURS, or null when night mode is off; device is the user's name, sound and wake come from the user's Pocket ID groups (OIDC_SOUND_GROUP, OIDC_WAKE_GROUP)",
+      "presence": "also presence_sleep_s (float, PRESENCE_SLEEP_S): with nobody in the room the screen goes dark this long after the last activity"
     },
     "GET /auth/login?next=<path>": "302 to the OIDC provider (authorization code + PKCE); 502 when the provider is unreachable",
     "GET /auth/callback": "303 to next with the session cookie set; 400 expired or foreign state, 403 refused by the provider, 502 token checks failed",
@@ -186,11 +194,25 @@
     "DELETE /alerts/{key}": {
       "auth": "ALERT_TOKEN",
       "response": "204 (idempotent)"
+    },
+    "POST /presence": {
+      "auth": "ALERT_TOKEN",
+      "body": "{present: bool} (strict JSON boolean; any other field gets 422)",
+      "response": "200 {present, since_s}; every screen gets a presence message"
+    },
+    "GET /presence": {
+      "auth": "ALERT_TOKEN",
+      "response": "200 {present: bool|null, since_s: float|null}"
+    },
+    "DELETE /presence": {
+      "auth": "ALERT_TOKEN",
+      "response": "204; back to unknown (present null), as with no sensor"
     }
   },
   "notes": [
     "alert_read: a failed synthesis or an unknown key answers error{bad_message}; a tap before the models load answers error{not_ready}",
     "tts.followup is set for every device; the page must ignore it on devices with wake=false",
-    "wake_clip: the page sends it only when /device-config says debug_audio=true; the backend drops the clip when DEBUG_AUDIO_DIR is unset"
+    "wake_clip: the page sends it only when /device-config says debug_audio=true; the backend drops the clip when DEBUG_AUDIO_DIR is unset",
+    "presence: sent on connect right after the snapshot only when a sensor has reported (present not null), and to every client on each POST or DELETE /presence. A page that loses its socket treats presence as unknown until told again"
   ]
 }

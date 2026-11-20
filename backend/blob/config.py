@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     weather_lon: float | None = Field(None, ge=-180, le=180)
     weather_refresh_s: float = Field(1200, ge=60)
 
+    # Presence wake: once the room's sensor says nobody is there (POST /presence), the idle blob
+    # rests as the clock and the screen goes dark this many seconds after the last activity.
+    presence_sleep_s: float = Field(600, ge=10)
+
     # Debug switch: keep the last DEBUG_AUDIO_KEEP utterances as WAV files in this folder (off when
     # empty). Personal voice recordings: turn it off and delete the folder after debugging.
     debug_audio_dir: str = ""

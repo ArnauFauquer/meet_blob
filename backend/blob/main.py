@@ -21,7 +21,7 @@ from numpy.typing import NDArray
 from starlette.responses import Response
 from starlette.types import Scope
 
-from . import alerts, oidc
+from . import alerts, oidc, presence
 from . import weather as weather_api
 from .alerts import Alerts, run_scheduler
 from .auth import Sessions, User, require_user, websocket_user
@@ -33,6 +33,7 @@ from .fakes import FakeStt, FakeTts
 from .gpu import Gpu
 from .hermes import HermesClient
 from .hub import Hub
+from .presence import Presence
 from .stt import SttResult, WhisperStt
 from .tts import KokoroTts
 from .turn import TurnManager
@@ -152,6 +153,7 @@ def create_app(
         st.alerts = st.hub.alerts = Alerts(
             st.db, st.hub.broadcast_snapshot, wall, ZoneInfo(settings.tz)
         )
+        st.presence = st.hub.presence = Presence(st.hub.broadcast_presence, wall)
         await st.alerts.load()  # overdue timers fire once, marked late
         st.hub.turns = TurnManager(
             stt=stt,
@@ -228,9 +230,12 @@ def create_app(
             silence_rms=settings.silence_rms,
             debug_audio=bool(settings.debug_audio_dir),
             night=NightHours(**settings.night) if settings.night else None,
+            # Presence wake
+            presence_sleep_s=settings.presence_sleep_s,
         )
 
     app.include_router(alerts.router)
+    app.include_router(presence.router)
     app.include_router(oidc.router)
     app.include_router(weather_api.router)
 
