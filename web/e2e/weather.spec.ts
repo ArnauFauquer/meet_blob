@@ -6,7 +6,7 @@ const WEATHER = 4;
 const REST_MS = 5 * 60_000; // CLOCK_AFTER_MS
 const CLOCK_TURN_MS = 30_000;
 
-test('the resting blob takes turns between the clock and the weather, with the week below', async ({ page }) => {
+test('the resting blob takes turns: the clock with the next hours below, the sky with the week', async ({ page }) => {
   mockOnly();
   await openBlob(page, 'e2e-weather');
   await waitView(page, 'idle');
@@ -15,9 +15,12 @@ test('the resting blob takes turns between the clock and the weather, with the w
   await idleFor(REST_MS);
   await expect.poll(async () => { const s = await shape(page); return s?.a === CLOCK && s.mix === 0; }, { timeout: 20_000 }).toBe(true);
   await expect(page.locator('#weather')).toHaveClass(/on/);
-  await expect(page.locator('#weather .day')).toHaveCount(7);
+  await expect(page.locator('#weather .hours .day')).toHaveCount(7);
+  await expect(page.locator('#weather .now')).toHaveCount(0); // the temperature now waits for the sky
   await idleFor(REST_MS + CLOCK_TURN_MS + 1000);
   await expect.poll(async () => { const s = await shape(page); return s?.a === WEATHER && s.mix === 0; }, { timeout: 20_000 }).toBe(true);
   await expect(page.locator('#weather .now')).not.toHaveClass(/off/);
   await expect(page.locator('#weather .now')).toHaveText('15°');
+  await expect(page.locator('#weather .hours')).toHaveCount(0);
+  await expect(page.locator('#weather .day')).toHaveCount(7);
 });

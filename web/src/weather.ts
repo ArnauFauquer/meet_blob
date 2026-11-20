@@ -1,5 +1,6 @@
 // The weather for the idle screen: GET /weather (the backend polls Open-Meteo),
-// the current sky for the blob and the week ahead as a strip under it.
+// the current sky for the blob and a strip under it: the next hours beside the
+// clock, the week ahead beside the sky.
 import type { Sky, WeatherKind } from './render/tables';
 
 export interface WeatherDay {
@@ -10,8 +11,17 @@ export interface WeatherDay {
   rain: number | null; // highest chance of precipitation, %
 }
 
+export interface WeatherHour {
+  time: number; // unix seconds, the hour's start
+  kind: WeatherKind;
+  temp: number;
+  rain: number | null; // chance of precipitation, %
+  day: boolean;
+}
+
 export interface Weather {
   current: { temp: number; kind: WeatherKind; day: boolean };
+  hours?: WeatherHour[]; // from the current hour on (an older backend sends none)
   days: WeatherDay[];
   updated: number;
 }
@@ -75,6 +85,33 @@ function dayLabel(date: string, i: number, locale?: string): string {
   return new Date(y, m - 1, d).toLocaleDateString(locale, { weekday: 'short' }).replace('.', '');
 }
 
+const rainChance = (r: number | null) => `<span class="rp">${r != null && r >= 30 ? `${Math.round(r)}%` : ''}</span>`;
+
+// Hour labels: "15:00", 24 h like the clock.
+const hourLabel = (time: number, locale?: string) =>
+  new Date(time * 1000).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
+
+// The coming hours as columns: label, icon, temperature, a likely rain chance. They start at
+// the next hour: the temperature now belongs to the sky turn. Empty when none is ahead.
+export function hoursHtml(w: Weather, nowMs = Date.now(), locale?: string): string {
+  const hours = (w.hours ?? []).filter((h) => h.time * 1000 > nowMs).slice(0, 7);
+  if (!hours.length) return '';
+  const cols = hours
+    .map(
+      (h) =>
+        `<div class="day"><span class="dn">${hourLabel(h.time, locale)}</span>${icon(h.kind, !h.day)}` +
+        `<span class="hi">${deg(h.temp)}</span>${rainChance(h.rain)}</div>`,
+    )
+    .join('');
+  return `<div class="week hours">${cols}</div>`;
+}
+
+// The strip for the resting blob: the next hours beside the clock (the week if there are none),
+// the week beside the sky.
+export function stripHtml(w: Weather, rest: 'clock' | 'weather', nowMs = Date.now(), locale?: string): string {
+  return (rest === 'clock' && hoursHtml(w, nowMs, locale)) || weatherHtml(w, rest === 'weather', locale);
+}
+
 // The panel's HTML: the temperature now (only while the blob shows the sky),
 // then one column per day with its icon, high, low and a likely rain chance.
 export function weatherHtml(w: Weather, showNow: boolean, locale?: string): string {
@@ -84,8 +121,7 @@ export function weatherHtml(w: Weather, showNow: boolean, locale?: string): stri
     .map(
       (d, i) =>
         `<div class="day${i === 0 ? ' today' : ''}"><span class="dn">${dayLabel(d.date, i, locale)}</span>${icon(d.kind)}` +
-        `<span class="hi">${deg(d.max)}</span><span class="lo">${deg(d.min)}</span>` +
-        `<span class="rp">${d.rain != null && d.rain >= 30 ? `${Math.round(d.rain)}%` : ''}</span></div>`,
+        `<span class="hi">${deg(d.max)}</span><span class="lo">${deg(d.min)}</span>${rainChance(d.rain)}</div>`,
     )
     .join('');
   return `${now}<div class="week">${days}</div>`;

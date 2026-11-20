@@ -1,9 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { skyParts, weatherLook } from './render/tables';
-import { fetchWeather, icon, restShows, weatherHtml, type Weather } from './weather';
+import { fetchWeather, hoursHtml, icon, restShows, stripHtml, weatherHtml, type Weather } from './weather';
+
+const H0 = Date.UTC(2026, 10, 19, 14) / 1000; // the hour now in the tests
+const NOW = H0 * 1000 + 20 * 60_000; // 20 minutes into it
 
 const W: Weather = {
   current: { temp: 14.6, kind: 'rain', day: true },
+  hours: Array.from({ length: 10 }, (_, i) => ({
+    time: H0 + i * 3600,
+    kind: i < 2 ? ('rain' as const) : ('clear' as const),
+    temp: 14.4 - i,
+    rain: i < 2 ? 70 : 0,
+    day: i < 3,
+  })),
   days: [
     { date: '2026-11-19', kind: 'rain', max: 16.4, min: 10.6, rain: 85 },
     { date: '2026-11-20', kind: 'clear', max: 21, min: 9, rain: 5 },
@@ -59,6 +69,27 @@ describe('weather', () => {
     expect(html).not.toContain('>5%');
     expect(html.match(/class="day/g)).toHaveLength(2);
     expect(weatherHtml(W, false)).toContain('now off');
+  });
+
+  it('renders the seven hours after the current one, without the temperature now', () => {
+    const html = hoursHtml(W, NOW, 'es');
+    expect(html.match(/class="day/g)).toHaveLength(7);
+    expect(html).toContain(new Date((H0 + 3600) * 1000).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', hour12: false }));
+    expect(hoursHtml(W, NOW, 'en-US')).not.toMatch(/AM|PM/); // 24 h, like the clock
+    expect(html).not.toContain('14°'); // the current hour (14.4) is left out
+    expect(html).not.toContain('15°'); // and so is the temperature now (14.6)
+    expect(html).not.toContain('class="now');
+    expect(html).toContain('13°'); // the next hour
+    expect(html).toContain('70%');
+    expect(html).toContain(icon('clear', true)); // the fourth hour is a clear night
+    expect(hoursHtml(W, H0 * 1000 + 9 * 3600_000)).toBe(''); // none ahead
+    expect(hoursHtml({ ...W, hours: undefined }, NOW)).toBe('');
+  });
+
+  it('shows the hours beside the clock and the week beside the sky', () => {
+    expect(stripHtml(W, 'clock', NOW)).toContain('week hours');
+    expect(stripHtml(W, 'weather', NOW)).toBe(weatherHtml(W, true));
+    expect(stripHtml({ ...W, hours: [] }, 'clock', NOW)).toBe(weatherHtml(W, false)); // no hours: the week
   });
 
   it('uses the moon icon only for clear nights', () => {

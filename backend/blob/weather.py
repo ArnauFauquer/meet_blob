@@ -1,4 +1,4 @@
-"""Weather for the idle screen: the current conditions and the week ahead.
+"""Weather for the idle screen: the current conditions, the next hours and the week ahead.
 
 Polls Open-Meteo (no key needed) for WEATHER_LAT, WEATHER_LON every WEATHER_REFRESH_S and keeps
 the last good answer, which the page reads from GET /weather. The WMO weather codes collapse into
@@ -9,6 +9,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 import httpx
@@ -22,6 +23,7 @@ log = logging.getLogger(__name__)
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 RETRY_S = 60  # after a failed fetch
 STALE_S = 6 * 3600  # older than this, the page stops showing it
+HOURS = 24  # hours served from the current one on
 
 Kind = Literal["clear", "partly", "cloudy", "fog", "rain", "snow", "storm"]
 
@@ -57,10 +59,43 @@ class Day(BaseModel):
     rain: int | None  # highest chance of precipitation, %
 
 
+class Hour(BaseModel):
+    time: float  # unix time of the hour's start
+    kind: Kind
+    temp: float
+    rain: int | None  # chance of precipitation, %
+    day: bool
+
+
 class Weather(BaseModel):
     current: Current
+    hours: list[Hour] = []
     days: list[Day]
     updated: float  # unix time of the fetch
+
+
+def parse_hours(body: dict[str, Any]) -> list[Hour]:
+    """Open-Meteo's hourly times are local to the place, offset by utc_offset_seconds."""
+    h = body.get("hourly")
+    if not h:
+        return []
+    tz = timezone(timedelta(seconds=body.get("utc_offset_seconds", 0)))
+    n = len(h["time"])
+    rain = h.get("precipitation_probability") or [None] * n
+    is_day = h.get("is_day") or [1] * n
+    return [
+        Hour(
+            time=datetime.fromisoformat(t).replace(tzinfo=tz).timestamp(),
+            kind=kind_of(code),
+            temp=temp,
+            rain=r,
+            day=bool(dy),
+        )
+        for t, code, temp, r, dy in zip(
+            h["time"], h["weather_code"], h["temperature_2m"], rain, is_day, strict=True
+        )
+        if code is not None and temp is not None
+    ]
 
 
 def parse(body: dict[str, Any], now: float) -> Weather:
@@ -71,6 +106,7 @@ def parse(body: dict[str, Any], now: float) -> Weather:
         current=Current(
             temp=c["temperature_2m"], kind=kind_of(c["weather_code"]), day=bool(c["is_day"])
         ),
+        hours=parse_hours(body),
         days=[
             Day(date=t, kind=kind_of(code), max=hi, min=lo, rain=r)
             for t, code, hi, lo, r in zip(
@@ -110,6 +146,7 @@ class WeatherService:
                 "latitude": self.lat,
                 "longitude": self.lon,
                 "current": "temperature_2m,weather_code,is_day",
+                "hourly": "temperature_2m,weather_code,precipitation_probability,is_day",
                 "daily": "weather_code,temperature_2m_max,temperature_2m_min,"
                 "precipitation_probability_max",
                 "timezone": "auto",
@@ -131,8 +168,13 @@ class WeatherService:
             await asyncio.sleep(wait)
 
     def current(self) -> Weather | None:
+        """The last fetch while fresh, its hours trimmed to the next HOURS from the current one."""
         w = self.latest
-        return w if w and self._wall() - w.updated < STALE_S else None
+        now = self._wall()
+        if not w or now - w.updated >= STALE_S:
+            return None
+        hours = [h for h in w.hours if h.time > now - 3600][:HOURS]
+        return w.model_copy(update={"hours": hours})
 
     async def aclose(self) -> None:
         await self._client.aclose()
