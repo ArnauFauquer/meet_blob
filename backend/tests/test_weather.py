@@ -11,7 +11,15 @@ from tests.conftest import signed_in
 AUTH = signed_in()
 
 BODY = {
+    "utc_offset_seconds": 3600,
     "current": {"temperature_2m": 17.4, "weather_code": 61, "is_day": 1},
+    "hourly": {
+        "time": ["2026-11-19T00:00", "2026-11-19T01:00", "2026-11-19T02:00"],
+        "weather_code": [0, 61, 3],
+        "temperature_2m": [10.2, 9.8, 9.1],
+        "precipitation_probability": [0, 70, 20],
+        "is_day": [0, 0, 0],
+    },
     "daily": {
         "time": ["2026-11-19", "2026-11-20"],
         "weather_code": [61, 0],
@@ -59,6 +67,31 @@ def test_parse() -> None:
     assert w.days[1].max == 21.0 and w.days[1].min == 9.5 and w.days[0].rain == 80
 
 
+H0 = 1795042800.0  # 2026-11-19T00:00+01:00
+
+
+def test_parse_hours() -> None:
+    hours = parse(BODY, 0).hours
+    assert [h.time for h in hours] == [H0, H0 + 3600, H0 + 7200]
+    assert [h.kind for h in hours] == ["clear", "rain", "cloudy"]
+    assert hours[1].temp == 9.8 and hours[1].rain == 70 and not hours[1].day
+
+
+def test_parse_without_hours() -> None:
+    body = json.loads(json.dumps(BODY))
+    del body["hourly"]
+    assert parse(body, 0).hours == []
+
+
+async def test_current_serves_hours_from_the_current_one() -> None:
+    now = [H0 + 3600 + 1800]  # 01:30
+    svc = WeatherService(0, 0, 1200, transport=open_meteo([]), wall=lambda: now[0])
+    await svc.fetch()
+    assert [h.time for h in svc.current().hours] == [H0 + 3600, H0 + 7200]  # type: ignore[union-attr]
+    assert len(svc.latest.hours) == 3  # type: ignore[union-attr]
+    await svc.aclose()
+
+
 def test_parse_without_rain_chance() -> None:
     body = json.loads(json.dumps(BODY))
     del body["daily"]["precipitation_probability_max"]
@@ -71,6 +104,7 @@ async def test_fetch_sends_place_and_keeps_latest() -> None:
     assert svc.current() is None
     await svc.fetch()
     assert calls[0].url.params["latitude"] == "41.4" and calls[0].url.params["forecast_days"] == "7"
+    assert "precipitation_probability" in calls[0].url.params["hourly"]
     assert svc.current() is not None and svc.current().updated == 50.0  # type: ignore[union-attr]
     await svc.aclose()
 

@@ -248,9 +248,17 @@ const TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml',
 };
 
-// GET /weather: a rainy week, as the backend reports it from Open-Meteo.
+// GET /weather: a rainy week, as the backend reports it from Open-Meteo, and the next day by the hour.
+const HOUR_NOW = Math.floor(Date.now() / 3600_000) * 3600;
 const MOCK_WEATHER = {
   current: { temp: 14.6, kind: 'rain', day: true },
+  hours: Array.from({ length: 24 }, (_, i) => ({
+    time: HOUR_NOW + i * 3600,
+    kind: i < 3 ? 'rain' : 'cloudy',
+    temp: 14 - i / 2,
+    rain: i < 3 ? 80 : 10,
+    day: true,
+  })),
   days: [
     ['rain', 16, 11, 85],
     ['storm', 15, 10, 90],

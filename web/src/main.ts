@@ -27,7 +27,7 @@ import { FollowUp, gateReason, wakeAllowed } from './wake/wake-gate';
 import { MicStats, PeakTracker, type WakePeak } from './wake/wake-log';
 import { checkVersion, entryBundle } from './version';
 import { keepAwake } from './wakelock';
-import { WEATHER_POLL_MS, fetchWeather, restShows, skyOf, weatherHtml, type Weather } from './weather';
+import { WEATHER_POLL_MS, fetchWeather, restShows, skyOf, stripHtml, type Weather } from './weather';
 import { BlobSocket, type SocketStatus } from './ws';
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
@@ -161,7 +161,7 @@ function view(): View {
 
 let idleSince = performance.now(); // start of the current unbroken idle stretch
 let weather: Weather | null = null;
-let stripRoom = 0.25; // share of the screen's height the week strip takes at the bottom (measured)
+let stripRoom = 0.25; // share of the screen's height the weather strip takes at the bottom (measured)
 
 // After CLOCK_AFTER_MS of idle the blob rests: as a clock, taking turns with
 // the sky outside when the backend has the weather.
@@ -190,12 +190,13 @@ function frameInput(): FrameInput {
   };
 }
 
-// The week strip under the resting blob; the temperature now joins it while the blob shows the sky.
+// The strip under the resting blob: the next hours beside the clock, the week (and the
+// temperature now) beside the sky.
 let weatherShown = '';
 function showWeather(): void {
   const el = $('weather');
   const r = view() === 'idle' ? rest(performance.now()) : 'none';
-  const html = weather && r !== 'none' ? weatherHtml(weather, r === 'weather') : '';
+  const html = weather && r !== 'none' ? stripHtml(weather, r) : '';
   el.classList.toggle('on', !!html);
   if (html && html !== weatherShown) el.innerHTML = weatherShown = html;
   if (html) stripRoom = Math.min(0.5, Math.max(0, 1 - el.getBoundingClientRect().top / innerHeight));
