@@ -27,6 +27,11 @@ def device_for(user: User, settings: Settings) -> Device:
     )
 
 
+class NightHours(BaseModel):
+    start: str  # HH:MM, browser local time
+    end: str  # HH:MM; earlier than start when the night crosses midnight
+
+
 class DeviceConfig(BaseModel):
     device: str
     sound: bool
@@ -36,3 +41,5 @@ class DeviceConfig(BaseModel):
     listen_no_speech_s: float
     silence_rms: float
     debug_audio: bool = False  # DEBUG_AUDIO_DIR is set: the page may send wake_clip audio
+    # Night mode (NIGHT_HOURS): the page dims, slows down and holds info alerts. None: off.
+    night: NightHours | None = None

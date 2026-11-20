@@ -31,5 +31,13 @@ def test_device_config(app_factory: Any) -> None:
         "listen_no_speech_s": 8.0,
         "silence_rms": 0.01,
         "debug_audio": False,
+        "night": None,
     }
     assert (desktop["device"], desktop["sound"], desktop["wake"]) == ("desktop", False, False)
+
+
+def test_device_config_night(app_factory: Any) -> None:
+    with TestClient(app_factory(night_hours="23:00-07:30")) as c:
+        cfg = c.get("/device-config", headers=signed_in("tablet")).json()
+    assert cfg["night"] == {"start": "23:00", "end": "07:30"}
+    assert cfg["quiet_hours"] == ""

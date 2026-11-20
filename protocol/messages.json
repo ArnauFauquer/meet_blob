@@ -167,7 +167,7 @@
   "http": {
     "GET /device-config": {
       "auth": "session cookie blob_session (set by /auth/callback), 401 otherwise",
-      "response": "{device, sound, wake, quiet_hours, followup_listen_s, listen_no_speech_s, silence_rms, debug_audio}; device is the user's name, sound and wake come from the user's Pocket ID groups (OIDC_SOUND_GROUP, OIDC_WAKE_GROUP)"
+      "response": "{device, sound, wake, quiet_hours, followup_listen_s, listen_no_speech_s, silence_rms, debug_audio, night}; night is {start, end} (HH:MM, browser local time) from NIGHT_HOURS, or null when night mode is off; device is the user's name, sound and wake come from the user's Pocket ID groups (OIDC_SOUND_GROUP, OIDC_WAKE_GROUP)"
     },
     "GET /auth/login?next=<path>": "302 to the OIDC provider (authorization code + PKCE); 502 when the provider is unreachable",
     "GET /auth/callback": "303 to next with the session cookie set; 400 expired or foreign state, 403 refused by the provider, 502 token checks failed",
