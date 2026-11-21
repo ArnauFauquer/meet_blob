@@ -153,6 +153,7 @@ Each pending timer (`snapshot.timers`, an alert with `source=timer` in state `pe
 | A timer fires | Its key leaves `timers` and shows up in `alerts`: the drop falls back to the body, sinks in through a liquid neck (1.1 s), the body gulps (a squash kick), and only then the morph to the alert shape starts. The alert, colour and alarm start at once as before. During a turn the drop still falls in; the alert stays held until the turn ends. |
 | A timer is cancelled | Its drop fades away where it is (0.5 s), with no gulp: easy to tell from a timer that rang. |
 | Many timers | The soonest `MAX_DROPS` (6) get a drop. |
+| Night and presence | The drops are lit like the body, before `uDim`, so the night dim and the presence black take them too, and they move at the night's 10 fps. Timers are urgent: one that fires at night or on the dark empty-room screen shows the alert, which lights the face, rings, and the drop falls in before the triangle (`e2e/presence.spec.ts`). |
 
 The text countdown above the blob (#24) is gone: the face shows state by shape and colour, not text, and two encodings of the same thing would compete for the eye. The exact time left is one question away ("¿cuánto le queda al temporizador?" goes to Hermes, which lists the timers with `GET /alerts`), and the long-press diagnostics show it (`timers`).
 

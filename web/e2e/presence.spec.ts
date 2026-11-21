@@ -107,3 +107,33 @@ test('at night: nobody there is black, someone there is the sleeping night blob,
   expect(await dbg(page, 'view')).toBe('idle');
   expect((await shape(page))?.b).toBe(0); // the sphere, no clock at night
 });
+
+test('at night on the dark screen, a pending timer that fires lights the face, rings, and its drop falls in first', async ({ page, request }) => {
+  test.setTimeout(120_000);
+  const alerts = alertSource(request);
+  const night = () => dbg<{ asleep: boolean; dim: number; maxFps: number }>(page, 'night');
+  const drops = () => dbg<{ key: string; mode: string }[]>(page, 'droplets');
+  try {
+    await openBlob(page, 'e2e-night-presence-sound-timer'); // night around now, 4 s presence_sleep_s, sound on
+    await waitView(page, 'idle');
+    const key = await alerts.post('dark-timer', { source: 'timer', in_s: 35 });
+    await expect.poll(async () => (await drops())?.[0]?.mode, { message: 'the drop orbits' }).toBe('orbit');
+    await expect.poll(async () => (await night())?.asleep, { message: 'night blob asleep, drop and all' }).toBe(true);
+    expect(await night()).toMatchObject({ dim: 0.2, maxFps: 10 }); // the drops are drawn through the same dim
+
+    await report(request, false);
+    await waitAsleep(page, true); // black, one frame every 5 s
+    expect(await dbg(page, 'view')).toBe('idle');
+
+    await expect.poll(() => dbg(page, 'view'), { message: 'the timer fires', timeout: 40_000 }).toBe('alert');
+    expect(await dbg(page, 'topAlert')).toBe(key);
+    await waitAsleep(page, false); // the face is back
+    expect(await bodyAsleep(page)).toBe(false);
+    await expect.poll(() => dbg<number>(page, 'alarms'), { message: 'it rings' }).toBe(1);
+    await expect.poll(async () => (await shape(page))?.a, { message: 'the triangle, once the drop is in' }).toBe(1);
+    expect(await drops()).toEqual([]);
+    expect(await night()).toMatchObject({ asleep: false });
+  } finally {
+    await alerts.cleanup();
+  }
+});
