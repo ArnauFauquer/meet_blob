@@ -126,4 +126,14 @@ Contact sheets in `docs/screenshots/motion/`: `clock`, `alert-timer-info`, `aler
 | Clock | No clock and no weather strip at night: the blob sleeps instead. Bright static digits all night are the worst case for screen wear, and nobody watches. Asking "hey blob, ¿qué hora es?" still works. |
 | Alerts | Only urgent alerts show and ring at night (timers are urgent by default). Info alerts stay in the snapshot but are hidden; they never ring, and appear silently when the night ends. An info alert that was ringing when the night begins goes quiet. An urgent alert wakes the blob while it rings and for 20 s after; then the red shape stays on screen, dimmed and at 10 fps. |
 
+`QUIET_HOURS` and `NIGHT_HOURS` are separate settings, and both stay:
+
+| | `QUIET_HOURS` (S4, older) | `NIGHT_HOURS` (night mode) |
+|---|---|---|
+| Sound | Mutes every alert sound in the window: timers and urgent alerts too | Only urgent alerts ring (timers are urgent by default) |
+| Screen | Unchanged: every alert shows, the blob is as bright as by day, the clock comes | The blob sleeps (dim, 10 fps, no clock); info alerts are hidden until the night ends |
+| Served as | `quiet_hours` string | `night {start, end}` or `null` |
+
+Use `NIGHT_HOURS`. If both are set and overlap, `QUIET_HOURS` still mutes the urgent alerts in its window: leave it empty unless that is what you want.
+
 Not verified: the tablet's real backlight. A web page cannot change it, so on an LCD tablet dark pixels cut screen wear and GPU heat but not the backlight; use the tablet's own night schedule or adaptive brightness for that. Frame time on the tablet at 10 fps is not measured either.
