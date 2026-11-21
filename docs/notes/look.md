@@ -2,7 +2,7 @@
 
 What changed in the blob shading, why, what it costs, and what still looks weak. The earlier assessment is in `docs/notes/web.md` (section "The look").
 
-Screenshots: `docs/screenshots/<state>-1280x800.png` and `-1024x768.png` (real flows against the mock backend). Motion: `docs/screenshots/motion/<state>.png`, 12 frames over 6 s each, plus `error.png` and `idle-night-dim0.35.png`.
+Screenshots: `docs/screenshots/<state>-1280x800.png` and `-1024x768.png` (real flows against the mock backend). Motion: `docs/screenshots/motion/<state>.png`, 12 frames over 6 s each, plus `error.png` and `idle-night.png`. Night mode: `docs/screenshots/night-<size>.png` (the day counterpart is `idle-<size>.png`).
 
 ## Starting point
 
@@ -30,7 +30,7 @@ The first version read as a glossy glass or soap bubble: a small simple studio, 
 | **Surface ripples in the SDF.** Three crossed sines replace the slow value-noise octave. The level noise is evaluated only when the level is above 0, at a lower frequency. | Cheaper. The lower frequency makes speech swells wobble instead of crumpling like foil. |
 | **Background halo.** A tight coloured glow plus a faint wide one, capped by `min(uGlow, 1.2)`. | Soft colour bleeding into near-black, without fogging the frame in bright states. |
 | **Tables.** `lava` colour per state. Speaking `bright` goes from 1.3 to 1.15. The state colours and their meaning are unchanged. | |
-| **Night dimming.** `BlobRenderer.dim` (0..1) multiplies `uBright`, and `blobDebug.setDim()` sets it. `idle-night-dim0.35.png` shows idle at 35 %. | A night mode only needs to set one number. Dimmed idle stays a calm violet with visible lava: no harsh contrast, no flash. |
+| **Dimming.** `BlobRenderer.setDim(source, v)` per source; the lowest wins and scales `uDim` (see Night mode below). | Night mode and any other dimmer each set their own number without overwriting each other. |
 | Kept | The `shape(p, id)` / `map()` contract and `mix(sdfA, sdfB, uMix)`, the bounding-sphere early exit, the 0.75 render scale, the 30 fps idle cap, `webglcontextlost` handling, the dither and the soft exponential tone map. `sphereShape()`'s body changed (lobes, ripples) but not its signature. |
 
 ## Quality tiers
@@ -112,3 +112,18 @@ Contact sheets in `docs/screenshots/motion/`: `clock`, `alert-timer-info`, `aler
 - **Alerts.** Alerts use the same shading, with a lava colour from `ALERT_LAVA`. Their flat faces get stronger flowing ripples in the reflection (`faceted`), so they do not mirror one flat colour.
 - **Cost.** The merged shader costs 1.92x the original at idle in SwiftShader: 1.44x from this shading on top of main's new `map()`, which already costs about 1.33x. If the tablet turns out slow, a cheap fix in `map()` is a compile-time `ALERTS` define: `blob.ts` would set it only while an alert shape is shown or morphing, at the cost of one shader rebuild (about 0.1 to 0.2 s) when an alert appears. The quality tiers lower the cost meanwhile: quality 0 is 1.72x the original.
 - **Load.** Compile, link and first draw take 277 ms: no load-time stall.
+
+## Night mode
+
+`NIGHT_HOURS` (for example `23:00-07:30`, browser local time) reaches the page as `night {start, end}` in `/device-config`. The schedule and the alert rule live in `web/src/night.ts`; `main.ts` only hooks them up.
+
+| What | How |
+|---|---|
+| Asleep | At night, once nothing has happened for `NIGHT_AWAKE_MS` (20 s), the idle blob sleeps. A tap or the wake word wakes it at once (the dim lifts in about 0.3 s) and it answers as usual; 20 s after the turn ends it falls asleep again (a 2.5 s fade). A turn, an alert being read and a ringing alarm keep it awake. |
+| Darker | `setDim('night', NIGHT_DIM)`, 0.2. The dim scales the light after the tone map (`uDim`), so the glints dim as much as the body: the brightest pixel goes from 255 to about 122 (sRGB), the mean of the frame from 34 to 14. Dimming `uBright` before the tone map (the first try) left the highlights almost as bright. The countdown and the fault line fade to 40 % (`body.night`). |
+| Slower | `setMaxFps('night', NIGHT_FPS)`, 10 fps instead of 30. The lowest cap of all sources applies in every view, so a source must let go (`Infinity`) when something happens; night mode does so as soon as it wakes. |
+| Look | `SLEEP_LOOK`: the idle colours a little deeper, less glow, a third of the flow, a slow shallow breath, the eyes half shut (`eyeH` 0.045) looking slightly down, a soft smile. The eyes barely wander. Acts: `snooze` (the eyes fall shut, the head nods forward and settles back, no start and no kick) and now and then a `yawn`, every 20 to 45 s. |
+| Clock | No clock and no weather strip at night: the blob sleeps instead. Bright static digits all night are the worst case for screen wear, and nobody watches. Asking "hey blob, ¿qué hora es?" still works. |
+| Alerts | Only urgent alerts show and ring at night (timers are urgent by default). Info alerts stay in the snapshot but are hidden; they never ring, and appear silently when the night ends. An info alert that was ringing when the night begins goes quiet. An urgent alert wakes the blob while it rings and for 20 s after; then the red shape stays on screen, dimmed and at 10 fps. |
+
+Not verified: the tablet's real backlight. A web page cannot change it, so on an LCD tablet dark pixels cut screen wear and GPU heat but not the backlight; use the tablet's own night schedule or adaptive brightness for that. Frame time on the tablet at 10 fps is not measured either.
