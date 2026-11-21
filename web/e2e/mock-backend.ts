@@ -403,7 +403,7 @@ async function alertsApi(req: IncomingMessage, res: ServerResponse, url: URL) {
   alerts.set(key, a);
   if (inS > 0) {
     a.timer = setTimeout(() => activate(a), inS * 1000);
-    broadcastSnapshot(); // the countdown shows the pending timer
+    broadcastSnapshot(); // the pending timer orbits as a droplet
   } else activate(a);
   res.writeHead(old ? 200 : 201);
   return res.end(JSON.stringify({ key, state: a.state, fire_at: a.fire_at }));

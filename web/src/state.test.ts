@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeView, overlayActive, setsOverlay, timerText, topAlert, turnActive, type ViewInput } from './state';
+import { computeView, overlayActive, setsOverlay, timerText, timersNow, topAlert, turnActive, type ViewInput } from './state';
 import { TURN_DONE_REASONS, type AlertItem } from './protocol';
 
 const base: ViewInput = { online: true, conv: 'idle', playing: false, overlay: false };
@@ -96,5 +96,15 @@ describe('timerText', () => {
     const t = [60, 120, 180, 240, 300].map((left_s, i) => ({ key: String(i), left_s }));
     expect(timerText(t, 0)).toBe('1:00  ·  2:00  ·  3:00  +2');
     expect(timerText(t.slice(0, 3), 0)).toBe('1:00  ·  2:00  ·  3:00');
+  });
+});
+
+describe('timersNow', () => {
+  it('counts each timer down from the snapshot, never below zero', () => {
+    expect(timersNow([], 3)).toEqual([]);
+    expect(timersNow([{ key: 'a', left_s: 65 }, { key: 'b', left_s: 2 }], 5)).toEqual([
+      { key: 'a', left_s: 60 },
+      { key: 'b', left_s: 0 },
+    ]);
   });
 });
