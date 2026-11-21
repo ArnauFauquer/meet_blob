@@ -352,8 +352,8 @@ async function presenceApi(req: IncomingMessage, res: ServerResponse) {
       return res.writeHead(422).end();
     }
     if (typeof body.present !== 'boolean') return res.writeHead(422).end();
-    // Like the backend: every "someone" is fresh; a repeated "nobody" keeps its time.
-    if (body.present || presence.present !== false) presence = { present: body.present, at: Date.now() };
+    // Like the backend: a repeated report keeps the time the value started.
+    if (body.present !== presence.present) presence = { present: body.present, at: Date.now() };
   } else return res.writeHead(405).end();
   for (const c of conns) if (c.hello) send(c, presenceMsg());
   return req.method === 'DELETE' ? res.writeHead(204).end() : out();

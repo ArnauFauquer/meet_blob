@@ -81,11 +81,13 @@ def test_report_and_read_back(api: TestClient, wall: Wall) -> None:
     assert post(api, {"present": False}).json() == {"present": False, "since_s": 0.0}
 
 
-def test_repeated_true_restarts_the_clock(api: TestClient, wall: Wall) -> None:
+def test_repeated_true_keeps_when_someone_came_in(api: TestClient, wall: Wall) -> None:
     post(api, {"present": True})
     wall.now += 30
-    # Each motion report is fresh: the screen wakes again.
-    assert post(api, {"present": True}).json()["since_s"] == 0.0
+    # A motion sensor firing again is not a new arrival.
+    assert post(api, {"present": True}).json() == {"present": True, "since_s": 30.0}
+    wall.now += 5
+    assert post(api, {"present": False}).json() == {"present": False, "since_s": 0.0}
 
 
 def test_repeated_false_keeps_when_the_room_emptied(api: TestClient, wall: Wall) -> None:

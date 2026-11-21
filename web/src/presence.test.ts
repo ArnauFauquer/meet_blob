@@ -28,13 +28,15 @@ describe('PresenceMachine without a sensor', () => {
 });
 
 describe('PresenceMachine, someone arrives', () => {
-  it('turns the resting clock back into the face', () => {
+  it('turns the clock of an empty room back into the face', () => {
     const p = machine();
-    const t = CLOCK_AFTER_MS + 60 * S; // idle since 0: the clock is up
+    p.report(false, 0, 0);
+    const t = REST_WHEN_EMPTY_MS + 5 * S;
+    expect(p.screen(t, 0, true)).toBe('rest');
     expect(p.restMs(t, 0, CLOCK_AFTER_MS)).toBeGreaterThan(0);
-    p.report(true, 0, t);
-    expect(p.restMs(t, 0, CLOCK_AFTER_MS)).toBeLessThan(0);
+    p.report(true, 0, t, 0, true);
     expect(p.screen(t, 0, true)).toBe('awake');
+    expect(p.restMs(t, 0, CLOCK_AFTER_MS)).toBe(-CLOCK_AFTER_MS);
     // While someone stays, the clock comes back on the usual timer.
     expect(p.restMs(t + CLOCK_AFTER_MS, 0, CLOCK_AFTER_MS)).toBe(0);
   });
@@ -42,23 +44,50 @@ describe('PresenceMachine, someone arrives', () => {
   it('wakes the dark screen at once', () => {
     const p = machine();
     p.report(false, 0, 0);
-    expect(p.screen(SLEEP_MS + S, 0, true)).toBe('sleep');
-    p.report(true, 0, SLEEP_MS + S);
-    expect(p.screen(SLEEP_MS + S, 0, true)).toBe('awake');
-    expect(p.restMs(SLEEP_MS + S, 0, CLOCK_AFTER_MS)).toBe(-CLOCK_AFTER_MS);
+    const t = SLEEP_MS + S;
+    expect(p.screen(t, 0, true)).toBe('sleep');
+    p.report(true, 0, t, 0, true);
+    expect(p.screen(t, 0, true)).toBe('awake');
+    expect(p.restMs(t, 0, CLOCK_AFTER_MS)).toBe(-CLOCK_AFTER_MS);
   });
 
   it('never sleeps while someone is there', () => {
     const p = machine();
-    p.report(true, 0, 0);
+    p.report(true, 0, 0, 0, true);
     expect(p.screen(100 * SLEEP_MS, 0, true)).toBe('awake');
   });
 
-  it('does not wake again for an old report (a reconnect)', () => {
+  it('a repeated true (a motion sensor firing again) does not interrupt the usual clock', () => {
     const p = machine();
-    const t = 2 * CLOCK_AFTER_MS;
-    p.report(true, (2 * CLOCK_AFTER_MS) / S, t); // someone arrived when the page loaded
-    expect(p.restMs(t, 0, CLOCK_AFTER_MS)).toBe(CLOCK_AFTER_MS);
+    p.report(true, 0, 0, 0, true);
+    const t = CLOCK_AFTER_MS + 60 * S; // idle since 0: the usual clock is up
+    p.report(true, 60, t, 0, true);
+    expect(p.restMs(t, 0, CLOCK_AFTER_MS)).toBe(60 * S);
+    expect(p.screen(t, 0, true)).toBe('awake');
+  });
+
+  it('a first true after no report (Blob or the page restarted) does not interrupt the clock', () => {
+    const p = machine();
+    const t = CLOCK_AFTER_MS + 60 * S;
+    p.report(true, 0, t, 0, true);
+    expect(p.restMs(t, 0, CLOCK_AFTER_MS)).toBe(60 * S);
+  });
+
+  it('someone back while the face still shows keeps the usual clock timer', () => {
+    const p = machine();
+    p.report(false, 0, 0);
+    const t = 10 * S; // under REST_WHEN_EMPTY_MS: still the face
+    p.report(true, 0, t, 0, true);
+    expect(p.restMs(t, 0, CLOCK_AFTER_MS)).toBe(t - CLOCK_AFTER_MS);
+  });
+
+  it('a true during an alert or a turn wakes nothing (the view is not idle)', () => {
+    const p = machine();
+    p.report(false, 0, 0);
+    p.report(true, 0, 2 * SLEEP_MS, 0, false);
+    // The alert ended at 2*SLEEP_MS: idle from then, someone there, the usual timer.
+    expect(p.restMs(2 * SLEEP_MS, 2 * SLEEP_MS, CLOCK_AFTER_MS)).toBe(-CLOCK_AFTER_MS);
+    expect(p.screen(2 * SLEEP_MS + 10 * SLEEP_MS, 2 * SLEEP_MS, true)).toBe('awake');
   });
 });
 
@@ -93,7 +122,7 @@ describe('PresenceMachine, nobody there', () => {
   it('a repeated "nobody" keeps the time the room emptied', () => {
     const p = machine();
     p.report(false, 0, 0);
-    p.report(false, 300, 300 * S);
+    p.report(false, 0, 300 * S); // even if since_s were wrong
     expect(p.screen(SLEEP_MS, 0, true)).toBe('sleep');
   });
 

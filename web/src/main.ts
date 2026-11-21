@@ -467,7 +467,7 @@ function handle(m: ServerMessage, binary: ArrayBuffer | null): void {
       if (m.code === 'not_ready') overlaySince = performance.now(); // models still loading: grey blob
       break;
     case 'presence':
-      presence.report(m.present, m.since_s, performance.now());
+      presence.report(m.present, m.since_s, performance.now(), idleSince, view() === 'idle');
       break;
     case 'hello_ok':
     case 'pong':

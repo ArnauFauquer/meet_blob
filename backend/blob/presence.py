@@ -39,13 +39,13 @@ class Presence:
     async def report(self, present: bool | None) -> None:
         """A report always reaches the screens.
 
-        `at` moves on every `true` (each motion report wakes the screen again) and when the value
-        changes; a repeated `false` keeps the time the room became empty, so repeating it does not
-        push the screen's sleep further away.
+        `at` moves only when the value changes: a repeated report (a motion sensor firing again, a
+        periodic resync) keeps the time the room filled or emptied. The page decides what a report
+        wakes (web/src/presence.ts).
         """
         if present is None:
             self.at = None
-        elif present or present != self.present:
+        elif present != self.present:
             self.at = self._wall()
         if present != self.present:
             log.info("presence: %s", {True: "someone", False: "nobody", None: "unknown"}[present])

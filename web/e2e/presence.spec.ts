@@ -54,6 +54,18 @@ test('nobody there: dark screen; someone arrives: the face; a tap on the dark sc
   await waitAsleep(page, true); // and it sleeps again after the quiet time
 });
 
+test('someone already there: a repeated true does not pull the clock back to the face', async ({ page, request }) => {
+  await openBlob(page, 'e2e-presence-pir');
+  await waitView(page, 'idle');
+  await report(request, true);
+  await page.evaluate(() => (window as unknown as { blobDebug: { idleFor(ms: number): void } }).blobDebug.idleFor(5 * 60_000));
+  await expect.poll(async () => { const s = await shape(page); return s?.a === 3 && s.mix === 0; }, { message: 'the clock' }).toBe(true);
+  await report(request, true); // the PIR fires again
+  await page.waitForTimeout(1500);
+  expect((await shape(page))?.a).toBe(3); // still the clock (SHAPE.clock)
+  expect(await asleep(page)).toBe(false);
+});
+
 test('an alert lights the dark screen; it sleeps again once the alert is gone', async ({ page, request }) => {
   const alerts = alertSource(request);
   await openBlob(page, 'e2e-presence-alert');

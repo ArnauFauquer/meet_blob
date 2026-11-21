@@ -10,8 +10,12 @@
 //          keep running; the screen wake lock stays held (see docs/presence.md).
 //
 // Only an idle view can rest or sleep: a turn, an alert, an error or offline
-// is always shown. Someone arriving (present: true) wakes the face at once; so
-// does a tap on the dark screen (the tap only wakes, it does not start a turn).
+// is always shown. Someone arriving (present: true) wakes the face at once
+// from rest or sleep; so does a tap on the dark screen (the tap only wakes, it
+// does not start a turn). A true while the face shows, while someone is
+// already there or after no report at all wakes nothing: the usual clock after
+// CLOCK_AFTER_MS goes on, so a motion sensor that fires again and again does
+// not keep pulling the face back. It only stops the screen from sleeping.
 // With no report (present: null, the default, and after a lost socket) the page
 // behaves exactly as without a sensor.
 
@@ -22,7 +26,7 @@ export const REST_WHEN_EMPTY_MS = 30_000;
 
 export class PresenceMachine {
   present: boolean | null = null;
-  private wokeAt = -Infinity; // the last sign of someone: a present report, or a tap that woke the screen
+  private wokeAt = -Infinity; // when someone arriving or a tap last woke the screen from rest or sleep
   private emptyAt = -Infinity; // when the room became empty
 
   private readonly sleepMs: () => number;
@@ -34,10 +38,10 @@ export class PresenceMachine {
 
   // A presence message. sinceS: how long the reported value has held, so a
   // page that loads into an empty room does not wait the whole time again.
-  report(present: boolean | null, sinceS: number | null, now: number): void {
-    const at = now - Math.max(0, sinceS ?? 0) * 1000;
-    if (present === true) this.wokeAt = Math.max(this.wokeAt, at);
-    if (present === false) this.emptyAt = at;
+  // idleSince and idle as for screen(): a true wakes only a resting or dark screen.
+  report(present: boolean | null, sinceS: number | null, now: number, idleSince = now, idle = false): void {
+    if (present === true && this.screen(now, idleSince, idle) !== 'awake') this.wokeAt = now;
+    if (present === false && this.present !== false) this.emptyAt = now - Math.max(0, sinceS ?? 0) * 1000;
     this.present = present;
   }
 

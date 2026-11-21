@@ -13,7 +13,7 @@ sent and the page behaves exactly as before.
 | Room | Screen |
 | --- | --- |
 | Unknown (no report since Blob started, after `DELETE /presence`, or while the page's socket is down) | As without a sensor: the face, and the clock after 5 minutes of idle |
-| Someone there (`present: true`) | The face at once, also from the clock or the dark screen. While nobody talks to it, the clock comes back after the usual 5 minutes. It never goes dark |
+| Someone there (`present: true`) | Someone arriving while the screen shows the empty-room clock or is dark: the face at once. Otherwise nothing changes: the usual rest (face, then the clock after 5 minutes of idle) goes on, and a sensor that keeps reporting `true` does not pull the face back. It never goes dark |
 | Nobody there (`present: false`) | After 30 s of quiet the idle blob rests as the clock (and the sky, if the weather is on). `PRESENCE_SLEEP_S` (default 600 s) after the last activity, the screen fades to black and nothing is drawn |
 
 "Activity" is the latest of: the room becoming empty, the end of the last turn, alert or error,
@@ -52,10 +52,13 @@ held.
 
 Rules:
 
-*   Every `true` counts as a new arrival: the screen wakes again, even if the last report was
-    also `true`.
-*   A repeated `false` keeps the time the room became empty, so sending it again (for example
-    every 10 minutes) does not push the dark screen further away.
+*   A `true` wakes the face only from the "nobody there" screens (the empty-room clock or the
+    dark screen). While someone is already there, after no report at all, or while the face still
+    shows, a `true` only stops the screen from going dark; the usual clock after 5 minutes is not
+    interrupted. So a PIR sensor that toggles while someone watches TV does not flip the clock
+    back to the face.
+*   A repeated report keeps the time the value started (`since_s` keeps counting), so sending
+    `false` again (for example every 10 minutes) does not push the dark screen further away.
 *   The state lives in memory only. After a Blob restart it is unknown until the next report
     (see the optional resync automation below).
 
