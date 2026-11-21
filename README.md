@@ -161,7 +161,7 @@ npm run dev          # http://localhost:5173, proxies /ws, /auth and the HTTP en
 npm run lint && npm run typecheck && npm test && npm run build   # build after the backend is merged: the page version comes from backend/blob/__init__.py
 ```
 
-Open `https://<host>/` and sign in with Pocket ID once; the session cookie keeps the browser signed in. Tap the blob to talk, tap again to send; tap while it thinks or speaks to cancel; long press opens diagnostics; tap an alert to hear it and clear it. When the signed-in user is in the wake group, the page also loads the wake-word and voice-activity models from `/models/` and listens for the phrase in `web/public/models/wake.json` ("hey blob", a model trained for this project; see `docs/wake-word-training.md`).
+Open `https://<host>/` and sign in with Pocket ID once; the session cookie keeps the browser signed in. Tap the blob to talk, tap again to send; tap while it thinks or speaks to cancel; long press opens diagnostics; tap an alert to hear it and clear it. With `NIGHT_HOURS` set, the blob sleeps at night (dim, 10 fps, no clock) until a tap or the wake word, and only urgent alerts show and ring (`docs/notes/look.md`, Night mode). When the signed-in user is in the wake group, the page also loads the wake-word and voice-activity models from `/models/` and listens for the phrase in `web/public/models/wake.json` ("hey blob", a model trained for this project; see `docs/wake-word-training.md`).
 
 End-to-end tests (Chromium headless, fake microphone, software GL):
 

@@ -7,6 +7,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_HOURS = r"([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -72,6 +74,10 @@ class Settings(BaseSettings):
     # sets for the container; glibc's ":Europe/Madrid" form is accepted.
     tz: str = "Europe/Madrid"
 
+    # Night mode: HH:MM-HH:MM in the browser's local time, may cross midnight. Served to the page
+    # as night {start, end} (null when empty). The page dims, slows down and holds info alerts.
+    night_hours: str = ""
+
     # Idle screen weather (Open-Meteo, no key). Off unless both are set.
     weather_lat: float | None = Field(None, ge=-90, le=90)
     weather_lon: float | None = Field(None, ge=-180, le=180)
@@ -130,6 +136,24 @@ class Settings(BaseSettings):
     @field_validator("quiet_hours")
     @classmethod
     def _quiet_hours(cls, v: str) -> str:
-        if v and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d", v):
+        if v and not re.fullmatch(_HOURS, v):
             raise ValueError("QUIET_HOURS must look like 22:00-07:00")
         return v
+
+    @field_validator("night_hours")
+    @classmethod
+    def _night_hours(cls, v: str) -> str:
+        v = v.strip()
+        if v and not re.fullmatch(_HOURS, v):
+            raise ValueError("NIGHT_HOURS must look like 23:00-07:30")
+        if v and v[:5] == v[6:]:
+            raise ValueError("NIGHT_HOURS must not start and end at the same time")
+        return v
+
+    @property
+    def night(self) -> dict[str, str] | None:
+        """The night window for /device-config, or None when night mode is off."""
+        if not self.night_hours:
+            return None
+        start, end = self.night_hours.split("-")
+        return {"start": start, "end": end}

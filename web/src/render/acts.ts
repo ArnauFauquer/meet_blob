@@ -144,6 +144,21 @@ export const ACTS: Record<string, Act> = {
     },
     kicks: [[2.3, -2]],
   },
+  // Night mode: the eyes fall shut, the head nods slowly forward and sinks a
+  // little, then it settles back, eyes half open again. No start, no kick.
+  snooze: {
+    dur: 7,
+    pose: (u) => {
+      const nod = hold(u, 1.0, 3.2, 4.6, 6.6);
+      return {
+        lid: -0.9 * hold(u, 0.2, 1.6, 4.8, 6.2),
+        pitch: 0.22 * nod,
+        y: -0.025 * nod,
+        sq: -0.04 * nod,
+        smile: -0.4 * nod,
+      };
+    },
+  },
   // Nods off slowly, then wakes with a start and shakes.
   doze: {
     dur: 4.5,
@@ -257,7 +272,7 @@ export const ACTS: Record<string, Act> = {
   },
 };
 
-export type Mood = 'idle' | 'info' | 'urgent' | 'clock' | 'thinking';
+export type Mood = 'idle' | 'info' | 'urgent' | 'clock' | 'thinking' | 'sleep';
 
 // What each mood does, with weights, and the pause between two acts (s).
 export const REPERTOIRE: Record<Mood, { acts: [string, number][]; gap: [number, number] }> = {
@@ -273,6 +288,8 @@ export const REPERTOIRE: Record<Mood, { acts: [string, number][]; gap: [number, 
     gap: [0.2, 0.9],
   },
   clock: { acts: [['hopHop', 2], ['wiggle', 2], ['curious', 1], ['spinJump', 1], ['backflip', 1]], gap: [7, 14] },
+  // Night mode: now and then it nods off or yawns, nothing more.
+  sleep: { acts: [['snooze', 3], ['yawn', 1]], gap: [20, 45] },
 };
 
 // Fixed pseudo-random 0..1, so film strips stay reproducible.

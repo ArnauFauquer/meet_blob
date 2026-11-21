@@ -1,3 +1,5 @@
+import type { NightHours } from './night';
+
 // Page settings. Defaults here; the device flags and limits come from GET /device-config.
 
 export const PAGE_VERSION: string = __BLOB_VERSION__;
@@ -16,6 +18,7 @@ export interface DeviceConfig {
   listen_no_speech_s: number;
   silence_rms: number;
   debug_audio: boolean; // DEBUG_AUDIO_DIR is set on the backend: wake_clip audio is kept
+  night: NightHours | null; // night mode (NIGHT_HOURS), browser local time; null: off
 }
 
 export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
@@ -27,6 +30,7 @@ export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
   listen_no_speech_s: 8,
   silence_rms: SILENCE_RMS,
   debug_audio: false,
+  night: null,
 };
 
 export function wsUrl(loc: Pick<Location, 'protocol' | 'host'> = location): string {

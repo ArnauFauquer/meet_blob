@@ -3,7 +3,7 @@ import { ALARM_DETUNE, ALARM_EVERY_MS, pickRing, ALARM_MS, ALARM_START_GAIN, Ala
 import type { AlertItem } from '../protocol';
 
 const at = (h: number, m = 0) => new Date(2026, 10, 12, h, m);
-const alert = (key: string): AlertItem => ({ key, source: 'timer', urgency: 'urgent', text: '', lang: 'es', late: false, activated_at: 1 });
+const alert = (key: string, urgency: AlertItem['urgency'] = 'urgent'): AlertItem => ({ key, source: 'timer', urgency, text: '', lang: 'es', late: false, activated_at: 1 });
 
 function rules(cfg: Partial<ChimeConfig> = {}, now = at(12)) {
   const c: ChimeConfig = { sound: true, quiet_hours: '', ...cfg };
@@ -74,6 +74,37 @@ describe('ChimeRules', () => {
     setClock(at(8));
     expect(r.update([alert('a')], false)).toBe(false);
     expect(r.update([alert('a'), alert('b')], false)).toBe(true);
+  });
+});
+
+describe('ChimeRules at night', () => {
+  it('rings for an urgent alert (a timer) at night', () => {
+    const { r } = rules();
+    expect(r.update([alert('t')], false, true)).toBe(true);
+    expect(r.fired).toEqual(['t']);
+  });
+  it('an info alert at night never rings, not even in the morning', () => {
+    const { r } = rules();
+    expect(r.update([alert('i', 'info')], false, true)).toBe(false);
+    expect(r.update([alert('i', 'info')], false, false)).toBe(false); // morning: shown, silent
+    expect(r.update([alert('i', 'info'), alert('j', 'info')], false, false)).toBe(true); // a new one by day rings
+    expect(r.fired).toEqual(['j']);
+  });
+  it('rings only for the urgent ones when both arrive together', () => {
+    const { r } = rules();
+    expect(r.update([alert('i', 'info'), alert('u')], false, true)).toBe(true);
+    expect(r.fired).toEqual(['u']);
+  });
+  it('held during a turn, it is judged when the turn ends', () => {
+    const { r } = rules();
+    expect(r.update([alert('i', 'info')], true, true)).toBe(false);
+    expect(r.update([alert('i', 'info')], false, false)).toBe(true); // the turn ended after the night
+  });
+  it('a re-raised info alert by day rings again', () => {
+    const { r } = rules();
+    expect(r.update([alert('i', 'info')], false, true)).toBe(false);
+    expect(r.update([], false, false)).toBe(false);
+    expect(r.update([alert('i', 'info')], false, false)).toBe(true);
   });
 });
 

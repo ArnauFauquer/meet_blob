@@ -36,6 +36,7 @@ interface SheetOpts {
   wide?: boolean; // 16:9 tiles, for the clock
   act?: string; // an act to start at t=0 (ACTS in render/acts.ts)
   frames?: number;
+  sleep?: boolean; // night mode: the sleeping blob
 }
 
 async function sheet(page: Page, view: string, speech: boolean, name = view, dim = 1, o: SheetOpts = {}): Promise<void> {
@@ -45,7 +46,7 @@ async function sheet(page: Page, view: string, speech: boolean, name = view, dim
       const d = (window as unknown as { blobDebug: Record<string, (...a: unknown[]) => void> }).blobDebug;
       const canvas = document.getElementById('blob') as HTMLCanvasElement;
       d.setDim(dim);
-      d.freeze(o.from ?? view, o.clock, o.alert);
+      d.freeze(o.from ?? view, o.clock, o.alert, undefined, o.sleep);
       if (o.act) d.act(o.act);
       const side = Math.round(canvas.height * 0.92);
       const aspect = o.wide ? 16 / 9 : 1;
@@ -63,7 +64,7 @@ async function sheet(page: Page, view: string, speech: boolean, name = view, dim
       for (let f = 0; f < frames; f++) {
         for (let i = 0; i < every; i++) {
           t += step;
-          d.step(step, view, speech ? level(t) : 0, i === every - 1, o.clock, o.alert);
+          d.step(step, view, speech ? level(t) : 0, i === every - 1, o.clock, o.alert, undefined, o.sleep);
         }
         // Read the canvas in the same task as the draw (no preserveDrawingBuffer needed).
         const x = (f % cols) * tileW;
@@ -118,7 +119,7 @@ test('motion contact sheets', async ({ page }) => {
   await sheet(page, 'speaking', true);
   await sheet(page, 'thinking', false);
   await sheet(page, 'error', false);
-  await sheet(page, 'idle', false, 'idle-night-dim0.35', 0.35); // night dimming hook
+  await sheet(page, 'idle', false, 'idle-night', 0.2, { sleep: true, every: 30 }); // night mode: asleep at NIGHT_DIM, 1 s apart (a snooze)
   const timer = { source: 'timer', urgency: 'info' } as const;
   await sheet(page, 'idle', false, 'clock', 1, { clock: '2026-01-01T09:41', wide: true });
   await sheet(page, 'alert', false, 'alert-timer-info', 1, { alert: timer });

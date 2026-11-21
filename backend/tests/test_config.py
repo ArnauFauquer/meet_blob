@@ -76,6 +76,9 @@ def test_required(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
         {"port": 0},
         {"kokoro_device": "tpu"},
         {"quiet_hours": "22-07"},
+        {"night_hours": "23-07"},
+        {"night_hours": "24:00-07:30"},
+        {"night_hours": "23:00-23:00"},
         {"oidc_client_id": ""},
         {"public_url": "blob.test"},
         {"oidc_issuer": "id.test"},
@@ -105,3 +108,12 @@ def test_tz(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TZ", bad)
         with pytest.raises(ValidationError, match="TZ must be an IANA zone"):
             make_settings(tmp_path)
+
+
+def test_night_hours(tmp_path: Path) -> None:
+    assert make_settings(tmp_path).night is None
+    s = make_settings(tmp_path, night_hours=" 23:00-07:30 ")
+    assert s.night_hours == "23:00-07:30"
+    assert s.night == {"start": "23:00", "end": "07:30"}
+    day = make_settings(tmp_path, night_hours="13:30-15:00")
+    assert day.night == {"start": "13:30", "end": "15:00"}

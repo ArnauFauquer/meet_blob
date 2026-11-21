@@ -20,6 +20,7 @@ import {
   CLOCK_REACH,
   LOBE_COUNT,
   SHAPE,
+  SLEEP_LOOK,
   alertLook,
   alertShape,
   clockDigits,
@@ -39,6 +40,9 @@ import type { View } from '../state';
 const RENDER_SCALE = 0.75;
 const CALM_FRAME_MS = 1000 / 30; // idle (and error, offline, alert) is capped at 30 fps
 const EASE_S = 0.6; // time constant of the state crossfade
+// Dimming fades: a quick brighten (a tap must feel instant), a slow fall asleep.
+const DIM_UP_S = 0.3;
+const DIM_DOWN_S = 2.5;
 // Quality tiers (QUALITY define in blob.frag): 2 full, 1 fewer march steps,
 // lobes and lava samples, 0 minimal. The page starts at 2 and steps down,
 // never up, when the moving average of the frame interval stays above SLOW_MS.
@@ -124,12 +128,14 @@ export interface FrameInput {
   clock?: Date | null; // the time to show: the idle blob rests as a clock while this is set
   weather?: Sky | null; // the sky outside: the idle blob shows it while this is set (before the clock)
   room?: number; // 0..1 of the screen's height taken at the bottom (the week strip): the resting clock or sky fits above it
+  sleep?: boolean; // night mode, nothing going on: the idle blob sleeps (darker, stiller, eyes half shut)
 }
 
 function targetOf(i: FrameInput): { look: Look; shape: number } {
   if (i.view === 'alert' && i.alert) return { look: alertLook(i.alert.urgency), shape: alertShape(i.alert.source) };
   if (i.view === 'idle' && i.weather) return { look: weatherLook(i.weather), shape: SHAPE.weather };
   if (i.view === 'idle' && i.clock) return { look: CLOCK_LOOK, shape: SHAPE.clock };
+  if (i.view === 'idle' && i.sleep) return { look: SLEEP_LOOK, shape: SHAPE.sphere };
   return { look: lookFor(i.view === 'alert' ? 'idle' : i.view), shape: SHAPE.sphere };
 }
 
@@ -185,7 +191,13 @@ export class BlobRenderer {
   private raf = 0;
   quality = MAX_QUALITY;
   autoQuality = true;
-  dim = 1; // night dimming, 0..1, multiplies every state's brightness (uBright)
+  // Dimming and frame caps by source (night mode, presence, ...): the darkest
+  // dim and the lowest cap win. A source lets go with setDim(src, 1) and
+  // setMaxFps(src, Infinity).
+  private readonly dims = new Map<string, number>();
+  private readonly fpsCaps = new Map<string, number>();
+  private dimShown = 1; // eased towards `dim`
+  private sleepW = 0; // 0..1 weight of the sleeping blob (fewer glances)
   private avgMs = 0;
   private slowS = 0;
 
@@ -213,6 +225,7 @@ export class BlobRenderer {
         uLevel: { value: 0 },
         uGlow: { value: 0 },
         uBright: { value: 0 },
+        uDim: { value: 1 },
         uFlash: { value: 0 },
         uRadius: { value: 0.78 },
         uShapeA: { value: first.shape },
@@ -267,6 +280,27 @@ export class BlobRenderer {
     this.flashT = 1;
   }
 
+  // Brightness 0..1 from one source: the light of every pixel (uDim, after the tone map) is scaled by the lowest.
+  setDim(source: string, v: number): void {
+    v = Math.max(0, Math.min(1, v));
+    if (v >= 1) this.dims.delete(source);
+    else this.dims.set(source, v);
+  }
+
+  get dim(): number {
+    return Math.min(1, ...this.dims.values());
+  }
+
+  // Highest frame rate one source allows; the lowest of all applies, in every view.
+  setMaxFps(source: string, fps: number): void {
+    if (!(fps > 0) || fps === Infinity) this.fpsCaps.delete(source);
+    else this.fpsCaps.set(source, fps);
+  }
+
+  get maxFps(): number {
+    return Math.min(Infinity, ...this.fpsCaps.values());
+  }
+
   get uniforms(): Record<string, { value: unknown }> {
     return this.material.uniforms;
   }
@@ -289,9 +323,9 @@ export class BlobRenderer {
 
   // Debug clock for the film strip: stop the loop and restart the motion from
   // zero in `view`'s look, so frames are reproducible.
-  freeze(view: View, clock?: Date | null, alert?: FrameInput['alert'], weather?: Sky | null): void {
+  freeze(view: View, clock?: Date | null, alert?: FrameInput['alert'], weather?: Sky | null, sleep = false): void {
     this.stop();
-    const { look, shape } = targetOf({ view, level: 0, clock, alert, weather });
+    const { look, shape } = targetOf({ view, level: 0, clock, alert, weather, sleep });
     this.mouth = newMouth();
     if (weather) this.sky = skyParts(weather);
     this.fallT = 0;
@@ -313,6 +347,8 @@ export class BlobRenderer {
     this.restY = 0;
     this.restFit = 1;
     this.glance = { n: 1, t: 0, x: 0, y: 0 };
+    this.dimShown = this.dim;
+    this.sleepW = look === SLEEP_LOOK ? 1 : 0;
   }
 
   // Advances the frozen clock by `dtS` with the given input; draws when asked.
@@ -326,7 +362,8 @@ export class BlobRenderer {
     const fi = this.input();
     const { view } = fi;
     const calm = view === 'idle' || view === 'error' || view === 'offline' || view === 'alert';
-    if (calm && now - this.lastDraw < CALM_FRAME_MS - 2) return;
+    const minMs = Math.max(calm ? CALM_FRAME_MS : 0, 1000 / this.maxFps);
+    if (now - this.lastDraw < minMs - 2) return;
     this.lastDraw = now;
     const dt = Math.min(0.1, this.last ? (now - this.last) / 1000 : 0);
     this.last = now;
@@ -404,7 +441,10 @@ export class BlobRenderer {
     u.uBreath.value = c.breath;
     u.uLevel.value = this.level;
     u.uGlow.value = c.glow;
-    u.uBright.value = c.bright * this.dim;
+    const dim = this.dim;
+    this.dimShown += (dim - this.dimShown) * (1 - Math.exp(-dt / (dim > this.dimShown ? DIM_UP_S : DIM_DOWN_S)));
+    u.uBright.value = c.bright;
+    u.uDim.value = this.dimShown;
     u.uFlash.value = this.flashT;
     u.uShapeA.value = this.morph.a;
     u.uShapeB.value = this.morph.b;
@@ -521,13 +561,15 @@ export class BlobRenderer {
     const air = morphing ? Math.sin(Math.PI * m.t) : 0;
 
     // Acts at rest (acts.ts): only once the shape has settled.
+    const sleeping = fi.view === 'idle' && !!fi.sleep && shape === SHAPE.sphere;
+    this.sleepW += ((sleeping ? 1 : 0) - this.sleepW) * (1 - Math.exp(-dt / 1.5));
     const mood: Mood | null = morphing
       ? null
       : shape === SHAPE.clock
         ? 'clock'
         : isAlertShape(shape)
           ? fi.alert?.urgency === 'urgent' ? 'urgent' : 'info'
-          : fi.view === 'idle' || fi.view === 'thinking' ? fi.view : null;
+          : sleeping ? 'sleep' : fi.view === 'idle' || fi.view === 'thinking' ? fi.view : null;
     const { pose: live, kick } = this.actor.step(dt, mood);
     // An act cut short (a tap, a reply, a morph) fades out from its last pose.
     this.moodW += ((mood ? 1 : 0) - this.moodW) * (1 - Math.exp(-dt / 0.15));
@@ -588,8 +630,9 @@ export class BlobRenderer {
     g.x += ((centre ? 0 : (rnd(g.n, 2) - 0.5) * 0.16) - g.x) * gk;
     g.y += ((centre ? 0 : (rnd(g.n, 3) - 0.5) * 0.08) - g.y) * gk;
     const gaze = u.uGaze.value as Vector2;
-    gaze.x += g.x * calm + p.gx;
-    gaze.y += g.y * calm + p.gy;
+    const roam = calm * (1 - 0.85 * this.sleepW); // a sleepy blob barely looks around
+    gaze.x += g.x * roam + p.gx;
+    gaze.y += g.y * roam + p.gy;
 
     // The act's expression on top of the state's face.
     const eyes = u.uEyes.value as Vector4;

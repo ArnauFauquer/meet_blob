@@ -66,7 +66,7 @@ Each item names the test or slice that answers it.
 *   **Wake word.** Can a custom "hey blob" model be trained that meets under 1 false accept per day with the TV on? This is not verified. `[S3]`
 *   **Hermes tool risk.** Does Hermes support a separate profile or toolset for Blob that excludes locks and shell? If not, the risk is accepted for a home LAN. `[S0 Hermes test]`
 *   **Stopwatch.** Does the author want one, and how does the blob show elapsed time without text? Not in this design. `[later]`
-*   **Night mode.** Should the blob dim on a schedule (brightness, frame rate) to limit heat and screen wear? `[S2]`
+*   **Night mode.** Should the blob dim on a schedule (brightness, frame rate) to limit heat and screen wear? `[S2]` Answered: yes, on `NIGHT_HOURS`. The blob sleeps (20 % light, 10 fps, eyes half shut, no clock), wakes for a tap or the wake word, and only urgent alerts show and ring at night; info alerts wait for the morning. See `docs/notes/look.md`, Night mode.
 *   **Opt-in clip log** of the author's voice for benchmarks: yes or no, and for how long. `[S1]`
 *   **Licences** of vad-web, openWakeWord, Kokoro and any model-serving tool must be checked before shipping. Voice Satellite is AGPL-3.0: read it for ideas, do not copy code. `[before shipping]`
 
@@ -345,6 +345,7 @@ Environment variables (name, default, first slice that needs it):
 | `ALERT_TOKEN` / `DEVICE_TOKEN` | required | S2 |
 | `FOLLOWUP_MAX` / `FOLLOWUP_LISTEN_S` / `LISTEN_NO_SPEECH_S` | 3 / 6 / 8 | S3 |
 | `QUIET_HOURS` | empty (none), format `22:00-07:00` | S4 |
+| `NIGHT_HOURS` | empty (off), format `23:00-07:30`; served as `night {start, end}` | later |
 
 The fixed fallback lines are text constants in `voices.py` (Spanish and English), not environment variables. The per-device `sound` and `wake` flags live in `config/devices.json`, served through `GET /device-config`.
 

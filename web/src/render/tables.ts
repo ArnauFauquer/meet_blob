@@ -55,6 +55,24 @@ export type ShapeId = (typeof SHAPE)[keyof typeof SHAPE];
 export const CLOCK_AFTER_MS = 5 * 60_000;
 export const CLOCK_LOOK: Look = { ...STATE_LOOK.idle, speed: 0.15, amp: 0.04, breath: 0.012 };
 
+// Night mode: the idle blob sleeps. The idle colours, deeper and with less
+// glow, a slow shallow breath, hardly any flow, eyes half shut and a soft
+// smile, looking a little down. The renderer also dims it (NIGHT_DIM).
+export const SLEEP_LOOK: Look = {
+  ...STATE_LOOK.idle,
+  color: [0.16, 0.1, 0.72],
+  speed: 0.07,
+  amp: 0.06,
+  breath: 0.028,
+  breathHz: 0.09,
+  glow: 0.45,
+  bright: 0.75,
+  eyeH: 0.045,
+  eyeY: 0.06,
+  gazeY: -0.03,
+  smile: 1.3,
+};
+
 // Weather: the idle rest takes turns between the clock and the sky outside
 // (CLOCK_TURN_MS of clock, then WEATHER_TURN_MS of weather).
 export const CLOCK_TURN_MS = 30_000;

@@ -1,4 +1,5 @@
 import type { AlertItem } from '../protocol';
+import { heldAtNight } from '../night';
 
 // The alarm's sounds: liquid bubbles, like the blob (scripts/make_sounds.py).
 export const ALARM_SOUNDS = ['/bubble-a.wav', '/bubble-b.wav', '/bubble-c.wav'] as const;
@@ -37,6 +38,8 @@ export interface ChimeConfig {
 // played at turn end only if the alert is still open; muted (dropped) inside
 // quiet hours. Alerts that arrive together share one chime. A key that leaves
 // the snapshot and comes back (acked, then re-raised) counts as a new alert.
+// At night (night mode) only urgent alerts ring: an info alert that comes due
+// at night never rings, it shows silently once the night is over.
 export class ChimeRules {
   private readonly seen = new Set<string>();
   private readonly pending = new Set<string>();
@@ -50,7 +53,7 @@ export class ChimeRules {
   }
 
   // Call on every snapshot and when a turn may have ended. True: play the chime now.
-  update(alerts: readonly AlertItem[], turnActive: boolean): boolean {
+  update(alerts: readonly AlertItem[], turnActive: boolean, night = false): boolean {
     const keys = new Set(alerts.map((a) => a.key));
     for (const k of this.seen) {
       if (!keys.has(k)) {
@@ -65,10 +68,11 @@ export class ChimeRules {
       }
     }
     if (!this.pending.size || turnActive) return false;
-    this.fired = [...this.pending];
+    const held = night ? new Set(alerts.filter(heldAtNight).map((a) => a.key)) : new Set<string>();
+    this.fired = [...this.pending].filter((k) => !held.has(k));
     this.pending.clear();
     const c = this.cfg();
-    return c.sound && !inQuietHours(c.quiet_hours, this.now());
+    return this.fired.length > 0 && c.sound && !inQuietHours(c.quiet_hours, this.now());
   }
 }
 

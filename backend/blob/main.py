@@ -28,7 +28,7 @@ from .auth import Sessions, User, require_user, websocket_user
 from .config import Settings
 from .db import Db
 from .debugaudio import AudioDump
-from .devices import DeviceConfig, device_for
+from .devices import DeviceConfig, NightHours, device_for
 from .fakes import FakeStt, FakeTts
 from .gpu import Gpu
 from .hermes import HermesClient
@@ -227,6 +227,7 @@ def create_app(
             listen_no_speech_s=settings.listen_no_speech_s,
             silence_rms=settings.silence_rms,
             debug_audio=bool(settings.debug_audio_dir),
+            night=NightHours(**settings.night) if settings.night else None,
         )
 
     app.include_router(alerts.router)
