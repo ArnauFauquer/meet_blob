@@ -14,6 +14,12 @@ precision highp float;
 #ifndef WEATHER
 #define WEATHER 0
 #endif
+// DROPS (define set by blob.ts): 0 until the first pending timer, then the
+// number of timer droplets (MAX_DROPS in droplets.ts). A page with no timers
+// pays nothing for them, even in software GL, which runs uniform branches.
+#ifndef DROPS
+#define DROPS 0
+#endif
 #if QUALITY >= 2
 #define MARCH_STEPS 96
 #define LOBES 5
@@ -67,6 +73,17 @@ uniform vec3 uBodyPos;
 uniform mat3 uBody;
 uniform float uBodyK;
 uniform float uBodyR;
+// Timer droplets (droplets.ts): one small drop per pending timer orbits the
+// body, in the body frame: centre (xyz) and radius (w). They join the body
+// with smooth-min, so a drop pinches off when a timer starts and falls back in
+// when it fires.
+#if DROPS > 0
+uniform vec4 uDrops[DROPS];
+uniform vec2 uDropGlow[DROPS]; // lava glow, ripeness (0..1 over the last minute)
+uniform int uDropN;
+uniform float uDropReach;      // body units: the farthest drop surface, 0 without drops
+uniform vec3 uDropLava;        // a ripe drop glows towards this (the timer alert's lava)
+#endif
 
 out vec4 fragColor;
 
@@ -310,6 +327,22 @@ bool isWeather(float id) {
   return id > 3.5;
 }
 
+// Smooth-min reach of a drop: a neck forms within it. Smaller than DROP_GAP
+// (droplets.ts), so an orbiting drop stays round and apart.
+float dropK(float r) {
+  return 0.05 + 0.5 * r;
+}
+
+float withDrops(vec3 p, float d) {
+#if DROPS > 0
+  for (int i = 0; i < DROPS; i++) {
+    if (i >= uDropN) break;
+    d = smin(d, length(p - uDrops[i].xyz) - uDrops[i].w, dropK(uDrops[i].w));
+  }
+#endif
+  return d;
+}
+
 // Distance in the body frame: main() marches the ray already moved into it
 // (the transform is affine, so the ray stays a line with the same t).
 float map(vec3 p) {
@@ -320,11 +353,11 @@ float map(vec3 p) {
   vec2 alerts = (isAlert(uShapeA) || (morph && isAlert(uShapeB))) ? alertShapes(p) : vec2(0.0);
   float clock = (isClock(uShapeA) || (morph && isClock(uShapeB))) ? clockShape(p) : 0.0;
   float weather = (isWeather(uShapeA) || (morph && isWeather(uShapeB))) ? weatherShape(p) : 0.0;
-  float a = pickShape(uShapeA, sphere, alerts, clock, weather);
-  if (!morph) return a;
+  float d = pickShape(uShapeA, sphere, alerts, clock, weather);
   // A mix of two distance fields is not a true distance: scaling it by 0.875
   // turns the usual 0.8 march step into about 0.7 while morphing.
-  return mix(a, pickShape(uShapeB, sphere, alerts, clock, weather), uMix) * 0.875;
+  if (morph) d = mix(d, pickShape(uShapeB, sphere, alerts, clock, weather), uMix) * 0.875;
+  return withDrops(p, d);
 }
 
 vec3 normalAt(vec3 p) {
@@ -564,6 +597,9 @@ void main() {
   // Bounding sphere: rays that miss it skip the march.
   // The clock and the weather are wider; the alert shapes reach further at their corners.
   float rb = (uShapeA > 2.5 || uShapeB > 2.5) ? 1.9 : (isAlert(uShapeA) || isAlert(uShapeB)) ? 1.5 : r * 1.5 + 0.1;
+#if DROPS > 0
+  rb = max(rb, uDropReach);
+#endif
   rb *= uBodyR;
   float h = b * b - (dot(rc, rc) - rb * rb);
   if (h > 0.0) {
@@ -640,8 +676,23 @@ void main() {
         spec *= 1.0 - 0.75 * min(front, 1.0) * max(exp(-max(fd, 0.0) / 0.09), fm.y * (1.0 - ck));
         face = min(front, 1.0) * smoothstep(0.012, -0.012, fd);
       }
+      // Timer droplets: a bead of lava, brightest where it faces the camera;
+      // in its last minute it pulses and warms towards the timer's colour.
+      vec3 lava = uLava;
+      float ember = 0.0; // a ripe drop's own glow, over the mirror
+#if DROPS > 0
+      float ripe = 0.0;
+      for (int i = 0; i < DROPS; i++) {
+        if (i >= uDropN) break;
+        float w = 1.0 - smoothstep(0.0, dropK(uDrops[i].w), length(bp - uDrops[i].xyz) - uDrops[i].w);
+        heat += w * uDropGlow[i].x * (0.35 + 0.65 * ndv);
+        ripe = max(ripe, w * uDropGlow[i].y);
+        ember = max(ember, w * uDropGlow[i].y * uDropGlow[i].x);
+      }
+      lava = mix(uLava, uDropLava, ripe);
+#endif
       float blob = min(heat, 1.0);
-      vec3 hotLava = mix(uLava, vec3(1.0), 0.2 * smoothstep(0.8, 1.6, heat)); // whiter in the core
+      vec3 hotLava = mix(lava, vec3(1.0), 0.2 * smoothstep(0.8, 1.6, heat)); // whiter in the core
       // Glow compressed per state, so the brightest state never turns flat white.
       float g = uGlow * (1.0 + uLevel * 0.6);
       vec3 inner = uColor * 0.03 * g + hotLava * (1.0 - exp(-heat * 2.0)) * 1.25 * (0.3 + 0.45 * min(g, 1.3)) * (1.0 + 0.45 * uLevel); // the level pulses the lava in every state
@@ -653,6 +704,9 @@ void main() {
       lit = mix(lit, uLava * 0.22, cavity);
       lit = mix(lit, mix(uLava, vec3(1.0, 0.42, 0.5), 0.6) * 0.85, tongue);
       lit = mix(lit, mix(uLava, vec3(1.0), 0.7) * 1.1, face);
+#if DROPS > 0
+      lit = mix(lit, uDropLava * (0.45 + 0.75 * ndv), 0.7 * ember);
+#endif
       col = mix(col, lit, cov);
     }
   }

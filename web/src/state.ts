@@ -56,9 +56,14 @@ export function overlayActive(since: number | null, now: number, playing: boolea
   return playing || now - since < OVERLAY_MIN_MS;
 }
 
-// The countdown above the blob: the soonest TIMERS_SHOWN pending timers as m:ss
-// (h:mm:ss from an hour), then +N for the rest, so the line never reaches the
-// blob. `elapsedS` is the time since the snapshot arrived.
+// Pending timers with the seconds left now (`elapsedS` is the time since the
+// snapshot arrived). Each one orbits the blob as a droplet (render/droplets.ts).
+export function timersNow(timers: readonly TimerItem[], elapsedS: number): TimerItem[] {
+  return timers.map((t) => ({ key: t.key, left_s: Math.max(0, t.left_s - elapsedS) }));
+}
+
+// The pending timers as text for the diagnostics view: the soonest
+// TIMERS_SHOWN as m:ss (h:mm:ss from an hour), then +N for the rest.
 export const TIMERS_SHOWN = 3;
 export function timerText(timers: readonly TimerItem[], elapsedS: number): string {
   const more = timers.length - TIMERS_SHOWN;

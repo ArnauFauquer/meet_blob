@@ -17,12 +17,6 @@
         font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; letter-spacing: 0.02em;
         pointer-events: none;
       }
-      #timer {
-        position: fixed; left: 16px; right: 16px; top: max(4vh, env(safe-area-inset-top));
-        text-align: center; color: rgba(255, 255, 255, 0.72);
-        font: 300 clamp(32px, 7vmin, 80px)/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-        font-variant-numeric: tabular-nums; letter-spacing: 0.04em; pointer-events: none;
-      }
       #weather {
         position: fixed; left: 16px; right: 16px; bottom: max(5vh, calc(env(safe-area-inset-bottom) + 48px));
         display: flex; justify-content: center; align-items: center; gap: clamp(10px, 3vmin, 40px);
@@ -68,7 +62,6 @@
   <body>
     <canvas id="blob"></canvas>
     <div id="fault" role="status" aria-live="polite"></div>
-    <div id="timer" hidden></div>
     <div id="weather" aria-hidden="true"></div>
     <div id="enroll" hidden></div>
     <div id="diag" hidden></div>

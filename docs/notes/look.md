@@ -137,3 +137,26 @@ Contact sheets in `docs/screenshots/motion/`: `clock`, `alert-timer-info`, `aler
 Use `NIGHT_HOURS`. If both are set and overlap, `QUIET_HOURS` still mutes the urgent alerts in its window: leave it empty unless that is what you want.
 
 Not verified: the tablet's real backlight. A web page cannot change it, so on an LCD tablet dark pixels cut screen wear and GPU heat but not the backlight; use the tablet's own night schedule or adaptive brightness for that. Frame time on the tablet at 10 fps is not measured either.
+
+## Timer droplets
+
+Each pending timer (`snapshot.timers`, an alert with `source=timer` in state `pending`) is a small drop of the blob's own liquid that orbits the body. Pasta and oven read at a glance with no numbers: two drops, the one that rings first is smaller. Logic in `render/droplets.ts`, the shader part in `blob.frag` (`uDrops`, `withDrops()`).
+
+| What | How |
+|---|---|
+| Size | `dropRadius()`: 0.07 at 0 s to 0.19 at 2 h and more (the sphere is 0.78), on a log scale with a power, so an 8 minute pasta and a 45 minute oven are clearly apart (the oven holds over twice the volume) and each drop visibly shrinks as it runs. |
+| Last minute | The drop glows warmer, towards the timer alert's lava (`ALERT_LAVA.urgent`), and pulses faster as the end nears (from once every 2 s to twice a second). |
+| Orbit | A ring seen from a little above: a drop passes in front below the face and behind above it, so it never covers the eyes or the clock digits. It hugs each shape (a squircle around the clock, the alert shapes and the sky; an ellipse round the sphere), follows a morph, turns once in about 25 s, and the drops spread evenly. A drop that comes or goes moves the others the least (the ring turns to their circular mean). The drops live in the body frame, so they hop, twirl and squash with it. |
+| Fit | Where the orbit does not fit the screen, the whole body scales down while timers run: about 0.65 on a portrait tablet, about 0.9 in landscape (the drops pass above and below). The small depth of the ring (0.25) keeps a drop in front from looking like a bigger timer. |
+| Volume (#34) | One body, one volume: the body gives the drops their volume (`vol` in `Droplets.write()`), so body plus drops always hold the sphere's. |
+| A timer starts | Its drop pinches off the body (smooth-min, `dropK()` smaller than the orbit gap, so an orbiting drop stays round) and moves out in 1.4 s. |
+| A timer fires | Its key leaves `timers` and shows up in `alerts`: the drop falls back to the body, sinks in through a liquid neck (1.1 s), the body gulps (a squash kick), and only then the morph to the alert shape starts. The alert, colour and alarm start at once as before. During a turn the drop still falls in; the alert stays held until the turn ends. |
+| A timer is cancelled | Its drop fades away where it is (0.5 s), with no gulp: easy to tell from a timer that rang. |
+| Many timers | The soonest `MAX_DROPS` (6) get a drop. |
+| Night and presence | The drops are lit like the body, before `uDim`, so the night dim and the presence black take them too, and they move at the night's 10 fps. Timers are urgent: one that fires at night or on the dark empty-room screen shows the alert, which lights the face, rings, and the drop falls in before the triangle (`e2e/presence.spec.ts`). |
+
+The text countdown above the blob (#24) is gone: the face shows state by shape and colour, not text, and two encodings of the same thing would compete for the eye. The exact time left is one question away ("¿cuánto le queda al temporizador?" goes to Hermes, which lists the timers with `GET /alerts`), and the long-press diagnostics show it (`timers`).
+
+Cost. The droplet code is compiled only once a timer has been pending (`DROPS` define, like `WEATHER`: one shader rebuild then), so a page without timers costs what it did: 89 to 90 ms per frame at idle in SwiftShader, as on main. With three drops: 110 ms at quality 2 (+23%), about +10% at qualities 1 and 0; software GL runs every uniform branch, a GPU skips the drops' loop beyond `uDropN`.
+
+Screenshots: `docs/screenshots/timers-{2,3,clock}-{1280x800,800x1280}.png`. Contact sheets: `motion/timer-droplets` (two timers pinch off, the short one ripens, fires and falls in, then the triangle) and `motion/timer-droplets-cancel` (a cancelled drop fades, a new one pinches off).

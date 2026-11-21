@@ -162,14 +162,36 @@ test('alert synthesis fails: the alert stays, the beep plays, no alert_ack (mock
   }
 });
 
-test('a pending timer counts down above the blob and goes when deleted', async ({ page }) => {
-  await openBlob(page, 'e2e-timer-countdown');
+interface Droplet { key: string; mode: string; r: number; out: number }
+const droplets = (page: import('@playwright/test').Page) => dbg<Droplet[]>(page, 'droplets');
+
+test('a pending timer orbits the blob as a droplet and fades when deleted', async ({ page }) => {
+  // The shader is built without the drops, then again with them (DROPS define): both must compile.
+  const shaderErrors: string[] = [];
+  page.on('console', (m) => void (m.type() === 'error' && /Shader Error/.test(m.text()) && shaderErrors.push(m.text())));
+  await openBlob(page, 'e2e-timer-droplet');
   await waitView(page, 'idle');
-  const key = await alerts.post('countdown', { source: 'timer', in_s: 120 });
-  const timer = page.locator('#timer');
-  await expect(timer).toBeVisible();
-  await expect(timer).toHaveText(/^(2:00|1:5\d)$/);
+  const key = await alerts.post('droplet', { source: 'timer', in_s: 120 });
+  const oven = await alerts.post('oven', { source: 'timer', in_s: 2700 });
+  await expect.poll(async () => (await droplets(page))?.filter((d) => d.mode === 'orbit').length, { message: 'two drops' }).toBe(2);
+  const ds = (await droplets(page))!;
+  expect(ds.find((d) => d.key === oven)!.r).toBeGreaterThan(ds.find((d) => d.key === key)!.r); // more time, bigger drop
+  expect(await page.locator('#timer').count()).toBe(0); // no text countdown any more
   await alerts.del(key);
-  await expect(timer).toBeHidden();
+  await expect.poll(async () => (await droplets(page))?.map((d) => d.key), { message: 'the deleted drop fades' }).toEqual([oven]);
   expect(await dbg(page, 'view')).toBe('idle'); // still pending: no alert shown
+  expect(shaderErrors).toEqual([]);
+});
+
+test('a timer that fires: its droplet falls into the blob, then the triangle', async ({ page }) => {
+  await openBlob(page, 'e2e-timer-merge');
+  await waitView(page, 'idle');
+  const key = await alerts.post('merge', { source: 'timer', in_s: 3 });
+  await expect.poll(async () => (await droplets(page))?.[0]?.key, { message: 'drop' }).toBe(key);
+  await expect.poll(async () => (await droplets(page))?.[0]?.mode, { message: 'falls in', intervals: [50] }).toBe('merge');
+  // The alert is up, but the body holds its shape until the drop is in.
+  expect(await dbg(page, 'view')).toBe('alert');
+  expect((await shape(page))?.b).toBe(SHAPE.sphere);
+  await settledShape(page, SHAPE.triangle);
+  expect(await droplets(page)).toEqual([]);
 });

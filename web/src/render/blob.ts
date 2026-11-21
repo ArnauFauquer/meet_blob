@@ -35,7 +35,8 @@ import {
 } from './tables';
 import { Actor, rest, scaled, type Mood, type Pose } from './acts';
 import { morphMix, newTwirl, stepMorph, stepTwirl, type Morph } from './morph';
-import type { AlertItem } from '../protocol';
+import { Droplets, MAX_DROPS } from './droplets';
+import type { AlertItem, TimerItem } from '../protocol';
 import type { View } from '../state';
 
 const RENDER_SCALE = 0.75;
@@ -67,6 +68,7 @@ const SQUASH_HZ = 2.6;
 const SQUASH_DAMP = 0.22; // damping ratio: a few visible jiggles
 const HOP = 0.22; // morph hop height (the blob radius is 0.78)
 const LEAN_HZ = 2.2;
+const GULP = -3; // squash kick as a fired timer's drop lands back in the body
 
 // Mouth shapes while speaking, one per syllable: half width, opening (times
 // the look's talk), pucker (0 wide lips, 1 round). Roughly a, e, i, o, u, m.
@@ -130,6 +132,8 @@ export interface FrameInput {
   weather?: Sky | null; // the sky outside: the idle blob shows it while this is set (before the clock)
   room?: number; // 0..1 of the screen's height taken at the bottom (the week strip): the resting clock or sky fits above it
   sleep?: boolean; // night mode, nothing going on: the idle blob sleeps (darker, stiller, eyes half shut)
+  timers?: readonly TimerItem[]; // pending timers, seconds left now: one droplet each orbits the body
+  fired?: readonly string[]; // keys of the active alerts: a timer that left `timers` for these fired (its drop falls in)
 }
 
 // The sky to draw: the alert's (rain soon), else the idle weather.
@@ -207,6 +211,8 @@ export class BlobRenderer {
   drawn = 0; // frames drawn so far (e2e: the dark screen draws almost none)
   private avgMs = 0;
   private slowS = 0;
+  private readonly drops = new Droplets(); // timer droplets (droplets.ts)
+  private roomH = 1.417; // free half height around the body's centre (smaller above the week strip)
 
   constructor(canvas: HTMLCanvasElement, input: () => FrameInput, onLost: (lost: boolean) => void) {
     this.input = input;
@@ -220,7 +226,7 @@ export class BlobRenderer {
       fragmentShader,
       depthTest: false,
       depthWrite: false,
-      defines: { QUALITY: MAX_QUALITY, WEATHER: 0 },
+      defines: { QUALITY: MAX_QUALITY, WEATHER: 0, DROPS: 0 },
       uniforms: {
         uRes: { value: new Vector2() },
         uFlow: { value: 0 },
@@ -255,6 +261,7 @@ export class BlobRenderer {
         uSky: { value: new Vector4() },
         uFall: { value: new Vector3() },
         uFaceT: { value: new Vector3(0, 0, 1) },
+        ...Droplets.uniforms(),
       },
     });
     this.scene.add(new Mesh(new PlaneGeometry(2, 2), this.material));
@@ -363,6 +370,11 @@ export class BlobRenderer {
     this.glance = { n: 1, t: 0, x: 0, y: 0 };
     this.dimShown = this.dim;
     this.sleepW = look === SLEEP_LOOK ? 1 : 0;
+    this.drops.reset();
+  }
+
+  get droplets() {
+    return this.drops.summary;
   }
 
   // Advances the frozen clock by `dtS` with the given input; draws when asked.
@@ -405,9 +417,18 @@ export class BlobRenderer {
       this.material.defines.WEATHER = 1; // one shader rebuild, the first time the sky shows
       this.material.needsUpdate = true;
     }
+    if (fi.timers?.length && this.material.defines.DROPS !== MAX_DROPS) {
+      this.material.defines.DROPS = MAX_DROPS; // one shader rebuild, the first time a timer is pending
+      this.material.needsUpdate = true;
+    }
     const { level } = fi;
-    const { look: target, shape } = targetOf(fi);
+    const { look: target, shape: wanted } = targetOf(fi);
     const wasMorphing = this.morph.a !== this.morph.b;
+    const rest = 1 + this.restW * (this.restFit - 1);
+    const dropFrame = { timers: fi.timers ?? [], fired: fi.fired ?? [], morph: this.morph, sky: this.sky, rest, roomH: this.roomH, t: this.t };
+    if (this.drops.frame(dt, this.material.uniforms, dropFrame)) this.kick(GULP);
+    // A fired timer's drop falls back in first; then the body turns into the alert.
+    const shape = this.drops.merging && !wasMorphing ? this.morph.a : wanted;
     stepMorph(this.morph, shape, dt);
     const k = 1 - Math.exp(-dt / EASE_S);
     const c = this.cur;
@@ -566,6 +587,7 @@ export class BlobRenderer {
     // A sky without the strip (the rain alert) still centres itself: its drops need room below.
     const centred = fi.room || shape === SHAPE.weather;
     this.restY += ((centred ? (hi + lo) / 2 - (fit * (top + bottom)) / 2 : 0) - this.restY) * ke;
+    this.roomH = half - 0.06 + this.restW * ((hi - lo) / 2 - (half - 0.06));
 
     // Kicks: a crouch before a morph jumps, a landing after it, a small
     // jiggle on any other change of view.
@@ -629,6 +651,9 @@ export class BlobRenderer {
     body.multiply(this.shear.set(1, -this.lean, 0, 0, 1, 0, 0, 0, 1));
     body.premultiply(this.scale.set(Math.sqrt(st), 0, 0, 0, 1 / st, 0, 0, 0, Math.sqrt(st)));
     body.multiplyScalar(1 / (1 + this.restW * (this.restFit - 1))); // a resting shape too big for its room
+    // Room for the timer droplets: the volume the drops took (one body, one
+    // volume), and a smaller body where the orbit would not fit the screen.
+    body.multiplyScalar(1 / this.drops.scale);
     const big = largestStretch(body);
     u.uBodyK.value = 1 / big;
     u.uBodyR.value = largestStretch(this.inv.copy(body).invert());
