@@ -15,6 +15,10 @@ Checks, in order (each prints PASS or FAIL):
  6. A spoken timer request goes through the timer rule: turn_done ok with audio, a new pending
     timer-<unix time> about 60 s ahead, and the fake Hermes counted no request.
  7. wake from a user outside the wake group gets bad_message; from one inside it opens a turn.
+ 8. A recurring alert ("daily HH:MM", local time in --tz): POST is pending at the next local
+    HH:MM, a repeat POST is ignored (200, same fire_at), a bad rule and repeat with in_s get 422,
+    GET shows the rule, DELETE removes it. With --repeat-wait it also waits for it to ring
+    (60 to 120 s), acks it and checks that it is pending again one day later.
 With BLOB_FAKE_MODELS=1 run the server with BLOB_FAKE_TRANSCRIPT="pon un temporizador de 1
 minuto" and omit --timer-wav (a loud tone is sent). Exit status 0 when every check passes.
 """
@@ -25,7 +29,9 @@ import sys
 import time
 from collections.abc import Callable
 from contextlib import ExitStack
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 import numpy as np
@@ -81,6 +87,10 @@ def main() -> int:
     p.add_argument("--alert-token", required=True, help="ALERT_TOKEN")
     p.add_argument("--hermes", required=True, help="fake Hermes base URL (for /requests)")
     p.add_argument("--timer-wav", help="spoken timer request; default: a loud tone (fake models)")
+    p.add_argument("--tz", default="Europe/Madrid", help="the server's TZ (recurring alerts)")
+    p.add_argument(
+        "--repeat-wait", action="store_true", help="wait up to 2 min for a recurring alert to ring"
+    )
     a = p.parse_args()
     http = a.http or a.url.replace("ws://", "http://").replace("wss://", "https://")[: -len("/ws")]
     api = httpx.Client(base_url=http, headers={"Authorization": f"Bearer {a.alert_token}"})
@@ -92,6 +102,7 @@ def main() -> int:
         timer_flow(api, page)
         voice_timer_flow(api, page, a)
         wake_flow(stack, a, t0)
+        recurring_flow(api, page, ZoneInfo(a.tz), a.repeat_wait)
     failed = [n for n, ok, _ in results if not ok]
     print(f"RESULT {len(results) - len(failed)}/{len(results)} checks passed: "
           f"{'PASS' if not failed else 'FAIL ' + ', '.join(failed)}")  # fmt: skip
@@ -248,6 +259,51 @@ def wake_flow(stack: ExitStack, a: argparse.Namespace, t0: float) -> None:
     if ok:
         tab.send(json.dumps({"type": "cancel", "turn": st["turn"]}))
         wait_for(tab, lambda m: isinstance(m, dict) and m["type"] == "turn_done", 5)
+
+
+def recurring_flow(api: httpx.Client, page: ClientConnection, tz: ZoneInfo, wait: bool) -> None:
+    key = f"e2e-repeat-{int(time.time())}"
+    # The minute after the next one: rings 60 to 120 s from now, in local time.
+    ring = datetime.now(tz).replace(second=0, microsecond=0) + timedelta(minutes=2)
+    rule = f"daily {ring:%H:%M}"
+    body = {"key": key, "source": "reminder", "text": "Prueba de recordatorio.", "repeat": rule}
+    r = api.post("/alerts", json=body)
+    want = int(ring.timestamp())
+    got = r.json() if r.status_code == 201 else {}
+    check(
+        "recurring pending at the next local time",
+        got.get("state") == "pending" and got.get("fire_at") == want and got.get("repeat") == rule,
+        f"{r.status_code} {r.text} want fire_at={want}",
+    )
+    again = api.post("/alerts", json=body)
+    check(
+        "recurring re-sent is ignored",
+        again.status_code == 200 and again.json().get("fire_at") == want,
+        f"{again.status_code} {again.text}",
+    )
+    bad = [
+        api.post("/alerts", json={**body, "key": f"{key}-bad", "repeat": "every day at 9"}),
+        api.post("/alerts", json={**body, "key": f"{key}-bad", "in_s": 60}),
+    ]
+    check("recurring bad rule -> 422", all(b.status_code == 422 for b in bad), str(bad))
+    listed = {x["key"]: x for x in api.get("/alerts").json()}
+    check("recurring listed with its rule", listed.get(key, {}).get("repeat") == rule)
+    if wait:
+        snap = wait_for(page, snapshot_where(lambda s: key in keys(s)), 150)
+        check("recurring rings", snap is not None, str(alert_in(snap, key)))
+        if snap is not None:
+            page.send(json.dumps({"type": "alert_ack", "key": key}))
+            wait_for(page, snapshot_where(lambda s: key not in keys(s)), 5)
+            row = {x["key"]: x for x in api.get("/alerts").json()}.get(key, {})
+            ahead = (row.get("fire_at") or 0) - want
+            check(
+                "recurring heard -> pending tomorrow",
+                row.get("state") == "pending" and 23 * 3600 <= ahead <= 25 * 3600,
+                f"{row} ahead={ahead}",
+            )
+    api.delete(f"/alerts/{key}")
+    gone = key not in {x["key"] for x in api.get("/alerts").json()}
+    check("recurring cancelled by DELETE", gone)
 
 
 if __name__ == "__main__":

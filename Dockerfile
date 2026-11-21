@@ -24,7 +24,7 @@ RUN npm run build
 FROM nvidia/cuda:12.9.2-base-ubuntu24.04
 
 # One line per system package. espeak-ng is not needed: kokoro-onnx bundles it via espeakng-loader.
-# tzdata: the chart sets TZ (quiet hours are local time).
+# tzdata: the chart sets TZ (quiet hours and recurring alerts are local time; zoneinfo reads it).
 # libcublas: same version the 12.9.2 runtime image ships.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \

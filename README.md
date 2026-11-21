@@ -74,7 +74,7 @@ uv run python scripts/e2e_turn.py --url ws://127.0.0.1:8000/ws --session <blob_s
 user must be in the wake group) and `--expect-followup true|false`. The scripts sign in with the
 `blob_session` cookie of a browser that signed in to that backend (copy it from the browser's
 developer tools). `scripts/e2e_alerts.py` drives the S4 flows
-(alert over HTTP, `alert_read`, `alert_ack`, a 2 s timer, a spoken timer through the timer rule,
+(alert over HTTP, `alert_read`, `alert_ack`, a 2 s timer, a spoken timer through the timer rule, a recurring alert (`--repeat-wait` waits for it to ring),
 `wake` gating); see [`docs/testing/exit-tests.md`](docs/testing/exit-tests.md). Other tools: `scripts/stt_cli.py` (transcribe
 a WAV), `scripts/tts_cli.py` (synthesise text), `scripts/timings_report.py` (SC1 median).
 

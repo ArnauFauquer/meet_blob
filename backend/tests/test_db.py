@@ -7,7 +7,7 @@ from blob.schemas import Timings
 
 async def test_schema_and_insert(tmp_path: Path) -> None:
     db = Db(str(tmp_path / "sub" / "blob.db"))
-    assert db.user_version() == SCHEMA_VERSION == 3
+    assert db.user_version() == SCHEMA_VERSION == 4
     await db.insert_turn(100, "es", "hola", "adiós", "ok", None, Timings(stt_ms=5))
     [row] = db.turns()
     assert row["lang"] == "es" and row["user_text"] == "hola" and row["reason"] == "ok"
@@ -31,20 +31,20 @@ async def test_delete_older(tmp_path: Path) -> None:
 
 
 def test_newer_file_keeps_its_version(tmp_path: Path) -> None:
-    # A file written by a later version (user_version 4, an extra table) still opens.
+    # A file written by a later version (user_version 5, an extra table) still opens.
     path = tmp_path / "blob.db"
     conn = sqlite3.connect(path)
     conn.execute("CREATE TABLE later (x TEXT)")
-    conn.execute("PRAGMA user_version = 4")
+    conn.execute("PRAGMA user_version = 5")
     conn.commit()
     conn.close()
     db = Db(str(path))
-    assert db.user_version() == 4
+    assert db.user_version() == 5
     db.close()
 
 
 async def test_s1_file_opens_with_s4_code(tmp_path: Path) -> None:
-    # An S1 database (turns only, user_version 1) gains the newer tables and version 3.
+    # An S1 database (turns only, user_version 1) gains the newer tables and version 4.
     path = tmp_path / "blob.db"
     conn = sqlite3.connect(path)
     conn.execute(_TURNS)
@@ -56,7 +56,7 @@ async def test_s1_file_opens_with_s4_code(tmp_path: Path) -> None:
     conn.commit()
     conn.close()
     db = Db(str(path))
-    assert db.user_version() == 3
+    assert db.user_version() == 4
     assert [r["user_text"] for r in db.turns()] == ["hola"]
     assert db.load_alerts() == []
     row = {
@@ -72,6 +72,7 @@ async def test_s1_file_opens_with_s4_code(tmp_path: Path) -> None:
         "created_at": 1,
         "activated_at": None,
         "acked_at": None,
+        "repeat": None,
     }
     await db.write_alerts([row], [])
     assert db.load_alerts() == [{**row, "late": 0}]
@@ -97,3 +98,30 @@ async def test_close_waits_for_a_running_write(tmp_path: Path) -> None:
     results = await asyncio.gather(*writes, closer, return_exceptions=True)
     # Every write either landed before the close or failed cleanly after it; no crash.
     assert all(r is None or isinstance(r, sqlite3.ProgrammingError) for r in results)
+
+
+async def test_v3_alerts_gain_the_repeat_column(tmp_path: Path) -> None:
+    # A version 3 file has alerts without `repeat`: the column is added, old rows read as None.
+    path = tmp_path / "blob.db"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE alerts (key TEXT PRIMARY KEY, source TEXT NOT NULL, urgency TEXT NOT NULL,"
+        " text TEXT NOT NULL, lang TEXT NOT NULL, state TEXT NOT NULL, fire_at INTEGER,"
+        " ttl_s INTEGER, late INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,"
+        " activated_at INTEGER, acked_at INTEGER)"
+    )
+    conn.execute(
+        "INSERT INTO alerts (key, source, urgency, text, lang, state, created_at)"
+        " VALUES ('door', 'ha', 'info', 'Puerta', 'es', 'active', 1)"
+    )
+    conn.execute("PRAGMA user_version = 3")
+    conn.commit()
+    conn.close()
+    db = Db(str(path))
+    assert db.user_version() == 4
+    [row] = db.load_alerts()
+    assert row["key"] == "door" and row["repeat"] is None
+    await db.write_alerts([{**row, "repeat": "daily 09:00"}], [])
+    assert db.load_alerts()[0]["repeat"] == "daily 09:00"
+    db.close()
+    Db(str(path)).close()  # opening again does not add the column twice

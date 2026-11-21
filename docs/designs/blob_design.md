@@ -207,6 +207,7 @@ One table `alerts` in SQLite:
 | `fire_at` | UTC epoch seconds, set for timers |
 | `ttl_s` | optional, counts from activation |
 | `late` | boolean, true when an overdue timer fired after a restart |
+| `repeat` | optional recurring rule (`daily 09:00`, `weekly tue 20:00`, `every 4 days 10:00`), local time in `TZ`; added after S4 |
 | `created_at`, `activated_at`, `acked_at` | UTC epoch seconds |
 
 Endpoints (all need the bearer token `ALERT_TOKEN`):
@@ -218,6 +219,8 @@ Endpoints (all need the bearer token `ALERT_TOKEN`):
 `snapshot.alerts[]` items are `{key, source, urgency, text, lang, late, activated_at}`.
 
 A scheduler is one asyncio task. It finds the earliest `pending` `fire_at`, sleeps until then (with a 250 ms cap on the sleep so a newly added timer is seen quickly), and moves `pending` rows with `fire_at` in the past to `active`. On startup, overdue timers fire once and are marked `late`, unless `ttl_s` has also passed. `ttl_s` starts when the row becomes `active`. A `pending` row is deleted only by `DELETE`. Other rows are deleted when the source calls `DELETE`, when `ttl_s` expires, or 24 h after `acked_at`. `snapshot` lists `active` alerts only.
+
+Recurring alerts (added after S4): a POST with `repeat` always starts `pending` at the rule's next local time. Where a one-off alert would end (acked, or `ttl_s` expired), a recurring row goes back to `pending` at its next time, so it is never `acked` and only `DELETE` removes it. An unattended recurring alert stays `active`; the times that pass meanwhile are skipped, not stacked. On startup it fires once, `late`, for the last missed time. The snapshot and the WebSocket protocol do not change. The contract is in `docs/alerts.md`.
 
 If the S0 test shows that Hermes cannot create timers through `/alerts`, a rule in the backend (`timer_rule.py`, built only in that case) runs before Hermes on the transcript. It matches "temporizador", "timer" or "temporitzador" with a number of seconds, minutes or hours (digits, the words "un", "una", "dos" to "diez", or "media hora"; Spanish, Catalan and English units). When it matches, Hermes is not called: the reply is a pre-rendered confirmation ("Vale, temporizador de N minutos" or "Okay, N minute timer"), the turn ends `ok`, and the timer key is `timer-<unix time>`. If it does not match, the transcript goes to Hermes.
 

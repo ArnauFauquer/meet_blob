@@ -114,5 +114,7 @@ def test_s3_s4_client_messages() -> None:
 
 
 def test_alert_out_matches_documented_response() -> None:
-    # POST /alerts and GET /alerts return {key, state, fire_at} (design, alerts contract).
-    assert set(schemas.AlertOut.model_fields) == {"key", "state", "fire_at"}
+    # POST /alerts and GET /alerts return {key, state, fire_at, repeat} (docs/alerts.md).
+    assert set(schemas.AlertOut.model_fields) == {"key", "state", "fire_at", "repeat"}
+    response = PROTOCOL["http"]["POST /alerts"]["response"]
+    assert "{key, state, fire_at, repeat}" in response

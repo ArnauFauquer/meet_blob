@@ -65,7 +65,7 @@ def test_a_signed_in_browser_cannot_use_alerts(api: TestClient) -> None:
 def test_new_key_201_then_update_200(api: TestClient) -> None:
     r = post(api, key="door", source="homeassistant", text="Puerta abierta")
     assert r.status_code == 201
-    assert r.json() == {"key": "door", "state": "active", "fire_at": None}
+    assert r.json() == {"key": "door", "state": "active", "fire_at": None, "repeat": None}
     a = rows(api)["door"]
     assert (a.urgency, a.lang, a.late, a.activated_at, a.created_at) == (
         "info",
@@ -126,10 +126,11 @@ def test_fire_at_epoch_and_rfc3339(api: TestClient) -> None:
         "key": "e",
         "state": "pending",
         "fire_at": NOW + 90,
+        "repeat": None,
     }
     # 2023-11-14T22:13:20Z is NOW; +02:00 and Z forms
     r = post(api, key="r1", source="cal", text="t", fire_at="2023-11-15T00:15:20+02:00")
-    assert r.json() == {"key": "r1", "state": "pending", "fire_at": NOW + 120}
+    assert r.json() == {"key": "r1", "state": "pending", "fire_at": NOW + 120, "repeat": None}
     r = post(api, key="r2", source="cal", text="t", fire_at="2023-11-14T22:14:20Z")
     assert r.json()["fire_at"] == NOW + 60
     assert rows(api)["e"].activated_at is None
@@ -138,7 +139,7 @@ def test_fire_at_epoch_and_rfc3339(api: TestClient) -> None:
 def test_in_s_uses_the_server_clock(api: TestClient, wall: Wall) -> None:
     wall.now = NOW + 0.4
     r = post(api, key="t", source="timer", text="t", in_s=120)
-    assert r.json() == {"key": "t", "state": "pending", "fire_at": NOW + 120}
+    assert r.json() == {"key": "t", "state": "pending", "fire_at": NOW + 120, "repeat": None}
 
 
 @pytest.mark.parametrize(
@@ -157,11 +158,12 @@ def test_changed_fire_at_updates_pending_and_active(api: TestClient) -> None:
         "key": "k",
         "state": "pending",
         "fire_at": NOW + 300,
+        "repeat": None,
     }
     r = post(api, key="k", source="cal", text="t", fire_at=NOW - 1)  # now due
     assert r.json()["state"] == "active" and rows(api)["k"].activated_at == NOW
     r = post(api, key="k", source="cal", text="t", fire_at=NOW + 600)  # moved to the future
-    assert r.json() == {"key": "k", "state": "pending", "fire_at": NOW + 600}
+    assert r.json() == {"key": "k", "state": "pending", "fire_at": NOW + 600, "repeat": None}
     assert rows(api)["k"].activated_at is None
 
 
@@ -230,7 +232,7 @@ def test_acked_in_s_always_reraises(api: TestClient) -> None:
     assert r.json()["state"] == "active"
     ack(api, "t")
     r = post(api, key="t", source="timer", text="Fin", in_s=60)  # a future timer again
-    assert r.json() == {"key": "t", "state": "pending", "fire_at": NOW + 60}
+    assert r.json() == {"key": "t", "state": "pending", "fire_at": NOW + 60, "repeat": None}
 
 
 def test_same_timer_twice_creates_two(api: TestClient, wall: Wall) -> None:
@@ -272,9 +274,9 @@ def test_get_lists_every_state(api: TestClient) -> None:
     ack(api, "k")
     got = sorted(api.get("/alerts", headers=AUTH).json(), key=lambda x: x["key"])
     assert got == [
-        {"key": "a", "state": "active", "fire_at": None},
-        {"key": "k", "state": "acked", "fire_at": None},
-        {"key": "p", "state": "pending", "fire_at": NOW + 60},
+        {"key": "a", "state": "active", "fire_at": None, "repeat": None},
+        {"key": "k", "state": "acked", "fire_at": None, "repeat": None},
+        {"key": "p", "state": "pending", "fire_at": NOW + 60, "repeat": None},
     ]
 
 

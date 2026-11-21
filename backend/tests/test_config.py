@@ -92,3 +92,16 @@ def test_validation(tmp_path: Path, override: dict[str, object]) -> None:
 
 def test_quiet_hours_ok(tmp_path: Path) -> None:
     assert make_settings(tmp_path, quiet_hours="22:00-07:00").quiet_hours == "22:00-07:00"
+
+
+def test_tz(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TZ", raising=False)
+    assert make_settings(tmp_path).tz == "Europe/Madrid"
+    monkeypatch.setenv("TZ", ":Europe/Madrid")  # glibc form, as some images set it
+    assert make_settings(tmp_path).tz == "Europe/Madrid"
+    monkeypatch.setenv("TZ", "America/New_York")
+    assert make_settings(tmp_path).tz == "America/New_York"
+    for bad in ("Mars/Olympus", "CET+1", "/etc/localtime", ""):
+        monkeypatch.setenv("TZ", bad)
+        with pytest.raises(ValidationError, match="TZ must be an IANA zone"):
+            make_settings(tmp_path)
