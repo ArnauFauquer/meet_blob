@@ -21,6 +21,9 @@ export class Capture implements Mic {
   private readonly buf = new Float32Array(1024);
   status: 'off' | 'open' | 'denied' = 'off';
   onFrame: (pcm: Int16Array) => void = () => {};
+  // Every block in either mode (hands-free stream or a tap recording): the
+  // background noise estimate of the adaptive volume.
+  onBlock: (pcm: Int16Array) => void = () => {};
 
   private readonly capMs: number;
   silenceRms: number; // from /device-config
@@ -102,6 +105,7 @@ export class Capture implements Mic {
     this.source = this.ctx.createMediaStreamSource(stream);
     this.node = new AudioWorkletNode(this.ctx, 'capture-processor', { numberOfOutputs: 1 });
     this.node.port.onmessage = (ev: MessageEvent<Int16Array>) => {
+      this.onBlock(ev.data);
       const rec = this.recorder;
       if (rec) {
         rec.push(ev.data);

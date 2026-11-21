@@ -1,11 +1,31 @@
 import { levelOf } from './pcm';
+import type { SoundKind } from './volume';
+
+// The peak limiter at the end of the chain. It only acts on what a volume
+// boost (volume.ts) pushes above LIMIT_DBFS; Blob's sounds at 0 dB stay below
+// it. A DynamicsCompressorNode adds a fixed makeup gain of
+// 0.6 × |threshold| × (1 − 1/ratio) dB (Web Audio spec, measured in Chromium),
+// which the bus gain in front of it takes back off, so audio below the
+// threshold passes at exactly unity.
+export const LIMIT_DBFS = -3;
+export const LIMIT_RATIO = 20;
+export const LIMIT_MAKEUP_DB = 0.6 * -LIMIT_DBFS * (1 - 1 / LIMIT_RATIO);
 
 // Reply playback on the one AudioContext. Chunks are scheduled back to back
 // (nextT = max(now, nextT) + duration). A new turn, a cancel or a tap stops
 // every source and resets nextT; audio of a stale turn is dropped.
+//
+// Graph: reply sources → analyser (the blob's level) → voice gain → bus;
+// effects → their own gain → bus; bus → limiter → speakers. The voice gain
+// (adaptive volume) is taken only when nothing is playing, so it never changes
+// inside a reply; an effect takes its gain when it starts.
 export class Playback {
   private readonly ctx: BaseAudioContext;
   private readonly out: AnalyserNode;
+  private readonly voice: GainNode;
+  private readonly bus: GainNode;
+  private voiceUntil = -Infinity; // context time the scheduled reply audio ends
+  private effectUntil = -Infinity; // context time the last effect ends
   private readonly sources = new Set<AudioBufferSourceNode>();
   private readonly buf = new Float32Array(1024);
   private nextT = 0;
@@ -18,13 +38,30 @@ export class Playback {
   onIdle: () => void = () => {};
   started = 0; // sources started, for the diagnostics and the e2e tests
   effects = 0; // effect sounds started (e2e: the chime plays once)
+  // The adaptive volume, as a linear gain for a sound that starts now.
+  gainFor: (kind: SoundKind) => number = () => 1;
 
   constructor(ctx: BaseAudioContext, beepUrl = '/beep.wav') {
     this.ctx = ctx;
     this.beepUrl = beepUrl;
     this.out = ctx.createAnalyser();
     this.out.fftSize = 1024;
-    this.out.connect(ctx.destination);
+    this.voice = ctx.createGain();
+    this.bus = ctx.createGain();
+    this.bus.gain.value = 10 ** (-LIMIT_MAKEUP_DB / 20);
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = LIMIT_DBFS;
+    limiter.knee.value = 0;
+    limiter.ratio.value = LIMIT_RATIO;
+    limiter.attack.value = 0.001; // measured in Chromium: no sample over full scale at +6 dB on Kokoro
+    limiter.release.value = 0.15;
+    this.out.connect(this.voice).connect(this.bus).connect(limiter).connect(ctx.destination);
+  }
+
+  // How long no sound of Blob's has been playing, in ms (0 while one plays).
+  // The noise estimate (noise.ts) skips Blob's own sound and its echo.
+  quietForMs(): number {
+    return Math.max(0, (this.ctx.currentTime - Math.max(this.voiceUntil, this.effectUntil)) * 1000);
   }
 
   get playing(): boolean {
@@ -70,13 +107,11 @@ export class Playback {
       const src = this.ctx.createBufferSource();
       src.buffer = audio;
       src.playbackRate.value = rate;
-      if (gain === 1) src.connect(this.ctx.destination);
-      else {
-        const g = this.ctx.createGain();
-        g.gain.value = gain;
-        src.connect(g).connect(this.ctx.destination);
-      }
+      const g = this.ctx.createGain();
+      g.gain.value = gain * this.gainFor('chime');
+      src.connect(g).connect(this.bus);
       src.start();
+      this.effectUntil = Math.max(this.effectUntil, this.ctx.currentTime + audio.duration / rate);
       this.effects += 1;
       return true;
     } catch {
@@ -108,6 +143,7 @@ export class Playback {
     }
     this.sources.clear();
     this.nextT = 0;
+    this.voiceUntil = Math.min(this.voiceUntil, this.ctx.currentTime);
     if (wasPlaying) this.onIdle();
   }
 
@@ -141,8 +177,12 @@ export class Playback {
     const src = this.ctx.createBufferSource();
     src.buffer = audio;
     src.connect(this.out);
+    // A reply (or read, or beep) that starts from silence takes the volume for
+    // all of it; chunks queued behind it keep that volume.
+    if (!this.sources.size) this.voice.gain.setValueAtTime(this.gainFor('voice'), this.ctx.currentTime);
     const start = Math.max(this.ctx.currentTime, this.nextT);
     this.nextT = start + audio.duration;
+    this.voiceUntil = this.nextT;
     src.onended = () => {
       this.sources.delete(src);
       if (!this.playing) {
