@@ -37,12 +37,23 @@ interface SheetOpts {
   act?: string; // an act to start at t=0 (ACTS in render/acts.ts)
   frames?: number;
   sleep?: boolean; // night mode: the sleeping blob
+  // Source of a function of t that overrides the view and alert, and gives the
+  // pending timers and fired alert keys (the timer droplets).
+  script?: string;
+}
+
+interface Scripted {
+  view?: string;
+  alert?: { source: string; urgency: 'info' | 'urgent' };
+  timers?: { key: string; left_s: number }[];
+  fired?: string[];
 }
 
 async function sheet(page: Page, view: string, speech: boolean, name = view, dim = 1, o: SheetOpts = {}): Promise<void> {
   const png = await page.evaluate(
     async ({ view, speech, frames, every, step, levelSrc, dim, o }) => {
       const level = new Function(`return (${levelSrc})`)() as (t: number) => number;
+      const script = o.script ? (new Function(`return (${o.script})`)() as (t: number) => Scripted) : null;
       const d = (window as unknown as { blobDebug: Record<string, (...a: unknown[]) => void> }).blobDebug;
       const canvas = document.getElementById('blob') as HTMLCanvasElement;
       d.setDim(dim);
@@ -64,7 +75,8 @@ async function sheet(page: Page, view: string, speech: boolean, name = view, dim
       for (let f = 0; f < frames; f++) {
         for (let i = 0; i < every; i++) {
           t += step;
-          d.step(step, view, speech ? level(t) : 0, i === every - 1, o.clock, o.alert, undefined, o.sleep);
+          const sc = script?.(t);
+          d.step(step, sc?.view ?? view, speech ? level(t) : 0, i === every - 1, o.clock, sc?.alert ?? o.alert, undefined, o.sleep, sc?.timers, sc?.fired);
         }
         // Read the canvas in the same task as the draw (no preserveDrawingBuffer needed).
         const x = (f % cols) * tileW;
@@ -73,7 +85,7 @@ async function sheet(page: Page, view: string, speech: boolean, name = view, dim
         const sh = sw / aspect;
         g.drawImage(canvas, (canvas.width - sw) / 2, (canvas.height - sh) / 2, sw, sh, x, y, tileW, tile);
         g.fillStyle = 'rgba(255,255,255,0.55)';
-        g.fillText(`${view} t=${t.toFixed(1)}s${speech ? ` lvl=${level(t).toFixed(2)}` : ''}${dim < 1 ? ` dim=${dim}` : ''}`, x + 6, y + 16);
+        g.fillText(`${script?.(t).view ?? view} t=${t.toFixed(1)}s${speech ? ` lvl=${level(t).toFixed(2)}` : ''}${dim < 1 ? ` dim=${dim}` : ''}`, x + 6, y + 16);
       }
       return out.toDataURL('image/png');
     },
@@ -85,25 +97,26 @@ async function sheet(page: Page, view: string, speech: boolean, name = view, dim
 // Milliseconds per drawn frame, synchronised with a 1-pixel readback. The
 // fastest of n frames: other processes only ever add time, so the minimum is
 // the steadiest figure on a shared machine.
-async function frameCost(page: Page, view: string, level: number, n = 20): Promise<number> {
+async function frameCost(page: Page, view: string, level: number, n = 20, timers?: Scripted['timers']): Promise<number> {
   return page.evaluate(
-    ({ view, level, n }) => {
+    ({ view, level, n, timers }) => {
       const d = (window as unknown as { blobDebug: Record<string, (...a: unknown[]) => void> }).blobDebug;
       const gl = (document.getElementById('blob') as HTMLCanvasElement).getContext('webgl2')!;
       const px = new Uint8Array(4);
       d.freeze(view);
-      d.step(1 / 30, view, level, true);
+      for (let i = 0; i < (timers ? 60 : 0); i++) d.step(1 / 30, view, level, false, undefined, undefined, undefined, false, timers); // drops out on their orbit
+      d.step(1 / 30, view, level, true, undefined, undefined, undefined, false, timers);
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); // warm-up and shader compile
       const ms: number[] = [];
       for (let i = 0; i < n; i++) {
         const t0 = performance.now();
-        d.step(1 / 30, view, level, true);
+        d.step(1 / 30, view, level, true, undefined, undefined, undefined, false, timers);
         gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
         ms.push(performance.now() - t0);
       }
       return Math.min(...ms);
     },
-    { view, level, n },
+    { view, level, n, timers },
   );
 }
 
@@ -135,6 +148,20 @@ test('motion contact sheets', async ({ page }) => {
   await sheet(page, 'alert', false, 'act-spin-triangle', 1, { alert: timer, act: 'spinJump', every: 3, frames: 18 });
   // Thinking: random acts back to back (ponder, compute, eureka...), 0.25 s apart.
   await sheet(page, 'thinking', false, 'thinking-acts', 1, { every: 8, frames: 36 });
+  // Timer droplets, 0.2 s apart: a 4 s timer and a 25 minute one pinch off the
+  // blob and orbit; the short one ripens (warmer, pulsing) and, when it fires,
+  // falls back in before the blob turns into the timer triangle.
+  const fire = ((t: number): Scripted => {
+    const long = { key: 'oven', left_s: 1500 - t };
+    if (t < 4.6) return { timers: [{ key: 'pasta', left_s: Math.max(0, 4.6 - t) }, long] };
+    return { view: 'alert', alert: { source: 'timer', urgency: 'urgent' }, timers: [long], fired: ['pasta'] };
+  }).toString();
+  await sheet(page, 'idle', false, 'timer-droplets', 1, { script: fire, every: 6, frames: 36 });
+  // A cancelled timer's drop fades where it is; a new one pinches off.
+  const cancel = ((t: number): Scripted => ({
+    timers: t < 2.5 ? [{ key: 'a', left_s: 600 }, { key: 'b', left_s: 3000 }] : [{ key: 'b', left_s: 3000 }, ...(t > 3.5 ? [{ key: 'c', left_s: 90 }] : [])],
+  })).toString();
+  await sheet(page, 'idle', false, 'timer-droplets-cancel', 1, { script: cancel, every: 6, frames: 30 });
   expect(await page.evaluate(() => (window as unknown as { blobDebug: { quality: number } }).blobDebug.quality)).toBe(2);
 });
 
@@ -148,7 +175,9 @@ test('frame cost at 1280x800 (SwiftShader, compare ratios only)', async ({ page 
     await page.evaluate((q) => (window as unknown as { blobDebug: { setQuality(q: number): void } }).blobDebug.setQuality(q), q);
     const idle = await frameCost(page, 'idle', 0);
     const listening = await frameCost(page, 'listening', 0.7);
-    rows.push(`quality ${q}: idle ${idle.toFixed(1)} ms, listening(level 0.7) ${listening.toFixed(1)} ms`);
+    const timers = [{ key: 'a', left_s: 300 }, { key: 'b', left_s: 1800 }, { key: 'c', left_s: 40 }];
+    const drops = await frameCost(page, 'idle', 0, 20, timers);
+    rows.push(`quality ${q}: idle ${idle.toFixed(1)} ms, listening(level 0.7) ${listening.toFixed(1)} ms, idle with 3 droplets ${drops.toFixed(1)} ms`);
   }
   console.log(`frame cost per drawn frame:\n${rows.join('\n')}`);
 });

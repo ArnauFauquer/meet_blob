@@ -1,4 +1,4 @@
-// Renders the five states and the alert shapes through real flows against the
+// Renders the five states, the alert shapes and the timer droplets through real flows against the
 // mock backend and writes docs/screenshots/<name>-<w>x<h>.png, plus the PWA icons.
 // Run: npm run screenshots (SwiftShader software GL: slow, about a minute).
 import { expect, test, type Page } from '@playwright/test';
@@ -131,6 +131,44 @@ for (const [w, h] of [
       await alerts.post('rain-soon', { source: 'rain', urgency: 'info', text: 'Empieza a llover en 20 minutos.' });
       await expect.poll(async () => { const s = await shape(page); return s?.a === 4 && s.mix === 0; }, { timeout: 20_000 }).toBe(true);
       await shot(page, 'alert', `alert-rain-info-${w}x${h}`, 3000);
+    } finally {
+      await alerts.cleanup();
+    }
+  });
+}
+
+// Pending timers as droplets orbiting the blob: pasta (8 min) and oven (45 min),
+// then a tea in its last minute, and the clock at rest with all three.
+for (const [w, h] of [
+  [1280, 800],
+  [800, 1280],
+]) {
+  test(`timer droplets at ${w}x${h}`, async ({ page, request }) => {
+    test.setTimeout(180_000);
+    await page.setViewportSize({ width: w, height: h });
+    const alerts = alertSource(request);
+    // Every drop out on its orbit (software GL runs the animation slower than real time).
+    const out = (n: number) =>
+      expect
+        .poll(async () => (await dbg<{ mode: string; out: number }[]>(page, 'droplets'))?.filter((d) => d.mode === 'orbit' && d.out === 1).length, { timeout: 60_000 })
+        .toBe(n);
+    try {
+      await openBlob(page, 'e2e-timer-shots');
+      await waitView(page, 'idle');
+      await fullQuality(page);
+      await alerts.post('pasta', { source: 'timer', in_s: 8 * 60 });
+      await alerts.post('oven', { source: 'timer', in_s: 45 * 60 });
+      await out(2);
+      await page.waitForTimeout(1500);
+      await page.screenshot({ path: `${OUT}timers-2-${w}x${h}.png` });
+      await alerts.post('tea', { source: 'timer', in_s: 40 });
+      await out(3);
+      await page.waitForTimeout(1500);
+      await page.screenshot({ path: `${OUT}timers-3-${w}x${h}.png` });
+      await page.evaluate(() => (window as unknown as { blobDebug: { idleFor(ms: number): void } }).blobDebug.idleFor(5 * 60_000));
+      await expect.poll(async () => (await shape(page))?.a, { timeout: 30_000 }).toBe(3);
+      await page.waitForTimeout(3000);
+      await page.screenshot({ path: `${OUT}timers-clock-${w}x${h}.png` });
     } finally {
       await alerts.cleanup();
     }
