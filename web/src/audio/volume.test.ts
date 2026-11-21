@@ -43,7 +43,8 @@ describe('gain curve', () => {
     expect(gainDb(VOICE_CURVE, 0, NOISE_LOUD_DBFS)).toBe(VOICE_CURVE.boostMaxDb);
     expect(gainDb(VOICE_CURVE, 0, -5)).toBe(VOICE_CURVE.boostMaxDb); // capped
     expect(gainDb(CHIME_CURVE, 0, -5)).toBe(CHIME_CURVE.boostMaxDb);
-    expect(CHIME_CURVE.boostMaxDb).toBeGreaterThan(VOICE_CURVE.boostMaxDb);
+    // +6 dB for the chime too: more and the limiter shaves the bubbles' attack
+    expect(CHIME_CURVE.boostMaxDb).toBe(6);
   });
 
   it('noise at night: the boost adds to the night drop', () => {
@@ -153,13 +154,13 @@ describe('AdaptiveVolume', () => {
     expect(v.state()).toMatchObject({ night: 0, voice_db: 0, chime_db: 0 });
   });
 
-  it('the hood on: louder, the chime more than the voice', () => {
+  it('the hood on: louder, the voice and the chime alike', () => {
     const { v, hear } = make();
     hear(-36, 8000);
     const s = v.state();
     expect(s.noise_dbfs).toBeGreaterThan(-39);
     expect(s.voice_db).toBeGreaterThan(4);
-    expect(s.chime_db).toBeGreaterThan(s.voice_db);
+    expect(s.chime_db).toBe(s.voice_db);
     expect(v.gain('voice')).toBeCloseTo(dbToGain(s.voice_db), 6);
   });
 

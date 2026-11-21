@@ -34,6 +34,6 @@ test('at night the reply is softer; ?volume=debug logs the estimate and the gain
 test('a noisy room raises the volume (?volume_noise), without the debug log', async ({ page }) => {
   await openBlob(page, 'vol-noisy', undefined, '?volume_at=12:00&volume_noise=-20');
   await waitView(page, 'idle');
-  expect(await dbg<VolumeState>(page, 'volume')).toEqual({ noise_dbfs: -20, night: 0, voice_db: 6, chime_db: 9 });
+  expect(await dbg<VolumeState>(page, 'volume')).toEqual({ noise_dbfs: -20, night: 0, voice_db: 6, chime_db: 6 });
   expect(volumeEvents(await log(page))).toHaveLength(0);
 });

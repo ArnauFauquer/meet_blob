@@ -5,8 +5,9 @@
 //
 // Two curves: the voice (replies, alert reads, the tts_fail beep) and the
 // chime (alarm bubbles, the beep for an alert that cannot be read). The chime
-// drops less at night, so a timer still wakes someone up, and climbs more over
-// noise, so it is heard across a kitchen with the hood on.
+// drops less at night, so a timer still wakes someone up. Over noise both
+// climb up to +6 dB: more pushes the bubbles into the limiter, which shaves
+// their attack (previews compared +9 and +6; +6 keeps the "bloop").
 //
 // Changes are smooth and predictable: nightness ramps over RAMP_MIN at the
 // edges of the night, the noise estimate is a percentile over seconds of audio
@@ -24,13 +25,14 @@ export interface Curve {
   boostMaxDb: number; // over a loud room (positive); also the overall cap
 }
 export const VOICE_CURVE: Curve = { nightDb: -9, boostMaxDb: 6 };
-export const CHIME_CURVE: Curve = { nightDb: -6, boostMaxDb: 9 };
+export const CHIME_CURVE: Curve = { nightDb: -6, boostMaxDb: 6 };
 
 // Background noise (dBFS of the processed microphone signal) mapped to the
 // boost: none at or below NOISE_QUIET_DBFS, the curve's maximum at or above
-// NOISE_LOUD_DBFS, linear in dB between. Calibrate with ?volume=debug: the
-// page logs the estimate (client_event `volume`) in a quiet room and with the
-// hood, the dishwasher or the TV on.
+// NOISE_LOUD_DBFS, linear in dB between. NOT CALIBRATED YET: these are guesses
+// until they are measured on the tablet with ?volume=debug (the page logs the
+// estimate as client_event `volume`) in a quiet room and with the hood, the
+// dishwasher and the TV on; see docs/notes/adaptive-volume.md.
 export const NOISE_QUIET_DBFS = -56;
 export const NOISE_LOUD_DBFS = -32;
 

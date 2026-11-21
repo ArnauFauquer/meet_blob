@@ -14,8 +14,8 @@ gain (dB) = curve.nightDb × nightness(local time) + boost(background noise)
 | | Voice (replies, alert reads, `tts_fail` beep) | Chime (alarm bubbles, alert-read beep) |
 | --- | --- | --- |
 | Deep night | −9 dB | −6 dB (a timer must still wake someone) |
-| Noise boost | 0 dB at ≤ −56 dBFS → +6 dB at ≥ −32 dBFS | 0 → +9 dB over the same range |
-| Cap | +6 dB | +9 dB |
+| Noise boost | 0 dB at ≤ −56 dBFS → +6 dB at ≥ −32 dBFS | the same |
+| Cap | +6 dB | +6 dB |
 
 The boost is linear in dB between the two noise levels and adds to the night drop (a TV at
 23:30 gives about −9 + 4 dB).
@@ -42,8 +42,9 @@ limiter (−3 dBFS, ratio 20, knee 0, attack 1 ms, release 150 ms). Chromium add
 of 0.6 × 3 × (1 − 1/20) = 1.71 dB (Web Audio spec; measured), which a gain in front of it takes
 back off, so at 0 dB nothing changes (measured in headless Chromium: Kokoro's peak goes through
 unchanged). With +6 dB on Kokoro the peak stays at −0.3 dBFS and speech loses 0.1–0.2 dB RMS to the
-limiter. The bubbles are peakier: at +9 dB the limiter shaves their attack and they gain about
-+7 dB RMS rather than +9.
+limiter. The bubbles are peakier, so the chime's boost stops at +6 dB (about +5.4 dB RMS after
+the limiter): previews at +9 dB gained about +7 dB RMS but the limiter shaved the bubbles' attack,
+and the user chose +6 to keep it.
 
 ## Trying it by hand
 
@@ -58,9 +59,21 @@ Page parameters (combine them):
 The diagnostics view (long press) and the 10 s `mic` log line also show `volume`
 (`noise_dbfs`, `night`, `voice_db`, `chime_db`); `window.blobDebug.volume` has the same.
 
-Calibrating on the tablet: open `/?volume=debug`, read `noise_dbfs` in a quiet room, then with the
-hood, the dishwasher and the TV at a normal level, and set `NOISE_QUIET_DBFS` / `NOISE_LOUD_DBFS`
-in `volume.ts` so that quiet stays at 0 dB and the loud cases get most of the boost.
+## Pending: calibration on the tablet (user)
+
+**Not done yet; the user does it on the tablet.** Until then `NOISE_QUIET_DBFS` (−56) and
+`NOISE_LOUD_DBFS` (−32) in `volume.ts` are guesses, so the noise boost may come in too early, too
+late or not at all (the night curve does not depend on them).
+
+1.  Open `/?volume=debug` on the tablet and watch the backend log for `"kind": "volume"` lines
+    (`event: "estimate"`, every 2 s).
+2.  Note `noise_dbfs` after about 10 s in each case: a quiet room; the hood on; the dishwasher on;
+    the TV at a normal level; and at night, a quiet room.
+3.  Set `NOISE_QUIET_DBFS` a few dB above the quiet room reading and `NOISE_LOUD_DBFS` near the
+    loudest case that should get the full +6 dB, then check with a question and an alert that the
+    `apply` lines show the expected `gain_db`.
+4.  If the hood or the dishwasher read close to the quiet room (Chrome's noise suppression removes
+    stationary noise), note it here: the fix is a separate unprocessed track for the measurement.
 
 ## Joining the night mode
 
@@ -71,7 +84,7 @@ night window comes only from there; the volume keeps its own curve (`nightDb`, `
 
 ## Not verified
 
-*   **The noise levels are guesses.** The page measures the microphone after Chrome's
+*   **The noise levels are guesses** (pending calibration above). The page measures the microphone after Chrome's
     `noiseSuppression` and `autoGainControl` (on, for the wake word and speech to text).
     Suppression removes most of a *stationary* noise such as a hood or a dishwasher, so they read
     lower than they sound; a TV or music passes. The thresholds must be set from the tablet's
