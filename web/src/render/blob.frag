@@ -35,6 +35,7 @@ uniform float uBreath;
 uniform float uLevel;   // mic or playback level, 0..1, already scaled by the state gain
 uniform float uGlow;
 uniform float uBright;
+uniform float uDim; // night mode and other dimmers: scales the light the screen gives off, highlights too
 uniform float uFlash;   // short brightness flash (busy)
 uniform float uRadius;
 // Shape morph. Ids (SHAPE in tables.ts): 0 sphere, 1 triangle, 2 square.
@@ -658,6 +659,7 @@ void main() {
 
   col *= uBright * (1.0 + uFlash * 0.6);
   col = 1.0 - exp(-col * 1.4);              // soft tone map, no hard clip
+  col *= uDim;                              // after the tone map, so the brightest glints dim as much as the rest
   col = pow(col, vec3(1.0 / 2.2));
   col += (hash(vec3(gl_FragCoord.xy, uFlow)) - 0.5) / 255.0; // dither the dark gradients
   fragColor = vec4(col, 1.0);
