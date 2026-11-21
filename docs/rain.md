@@ -15,7 +15,8 @@ bringing the washing in.
 | It is already raining (the current quarter is wet) | no alert |
 | Rain stops and starts again, or the next fetch moves the start by a quarter | no second alert: the same episode |
 | Two hours (`EPISODE_GAP_S`) without rain, then rain again | a new episode, a new alert |
-| Rain due while in `RAIN_SOON_QUIET` (22:00-08:00, the place's local time) | no alert. If rain is still coming when the window ends, the alert comes then ("en 10 minutos") |
+| It is night (`NIGHT_HOURS`, read in `TZ`) | no alert is created. If rain is still coming when the night ends, the alert comes then ("en 15 minutos"); if it is already raining by then, none |
+| No `NIGHT_HOURS` | no night: the alert can come at any hour |
 | Someone tapped the alert | it stays acked; later fetches do not raise it again |
 
 A quarter is wet when the forecast precipitation in it is at least 0.1 mm (the smallest step
@@ -27,6 +28,20 @@ the rain, stable for the episode), `ttl_s` until 30 minutes after the rain was d
 through the alert store like any `POST /alerts`, so every screen gets it once through the
 snapshot, the bubble alarm rings once, and it survives a restart. After a restart, a `rain-soon-`
 row still in the store keeps its episode going, so the alert is not raised twice.
+
+## Night
+
+The rain alert uses night mode's window, `NIGHT_HOURS` (for example `23:00-07:30`), so there is
+one night for the whole house. The page reads it in the browser's local time; the backend reads
+it in `TZ` (default `Europe/Madrid`, which the chart sets and the tablet's clock shares), so the
+two agree and daylight saving moves both. During the night the watcher keeps following the
+forecast (rain that starts at night still opens an episode) but creates no alert. The first check
+after the night ends warns if rain is still due within the lead.
+
+An alert created just before the night (22:50 for rain at 23:15) rings as usual. Once the night
+begins, night mode hides `info` alerts until morning; this one's `ttl_s` ends 30 minutes after the
+rain was due (23:45), so it is gone by then and does not show up stale at dawn. The alert raised
+when the night ends comes after the page's night too (same window, same clock), so it rings.
 
 ## Where the logic lives, and why
 
@@ -73,7 +88,6 @@ Off unless `WEATHER_LAT` and `WEATHER_LON` are set (the same place as the idle w
 | --- | --- | --- |
 | `RAIN_SOON` | `true` | `false` turns the alert off |
 | `RAIN_SOON_LEAD_MIN` | `30` | 5 to 120 |
-| `RAIN_SOON_QUIET` | `22:00-08:00` | no alert in this window, the place's local time; empty: always |
 | `RAIN_SOON_MODEL` | `best_match` | an Open-Meteo `models` value; the home deployment uses `meteofrance_seamless` |
 | `RAIN_SOON_LANG` | `es` | `es`, `ca` or `en` |
 

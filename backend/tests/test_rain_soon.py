@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -21,9 +22,10 @@ from blob.rain_soon import (
     parse,
     parse_window,
 )
-from tests.conftest import make_settings
 
 CET = 3600  # Barcelona in November
+MADRID = ZoneInfo("Europe/Madrid")
+NIGHT = "23:00-07:30"  # NIGHT_HOURS, as the page's night mode reads it
 DAY = "2026-11-20"
 
 
@@ -53,8 +55,8 @@ def quarters(first: str, mm: list[float | None], day: str = DAY) -> list[Quarter
 LEAD = 30 * 60
 
 
-def warn_at(qs: list[Quarter], now: float, episode: float = 0, quiet: bool = False) -> Any:
-    return decide(qs, now, episode, lead_s=LEAD, quiet=quiet)
+def warn_at(qs: list[Quarter], now: float, episode: float = 0, night: bool = False) -> Any:
+    return decide(qs, now, episode, lead_s=LEAD, night=night)
 
 
 # The pure decision
@@ -126,23 +128,33 @@ def test_a_new_episode_after_a_long_dry_spell_warns_again() -> None:
     assert again.warn is not None and again.warn.start == at("18:45") and again.warn.minutes == 5
 
 
-def test_quiet_hours_do_not_warn_and_do_not_use_up_the_episode() -> None:
+def test_night_does_not_warn_and_does_not_use_up_the_episode() -> None:
     qs = quarters("03:00", [0, 0.5])
-    d = warn_at(qs, at("03:05"), quiet=True)
+    d = warn_at(qs, at("03:05"), night=True)
     assert d.warn is None and d.episode_until == 0
 
 
 def test_night_window() -> None:
-    night = parse_window("22:00-08:00")
-    assert night == (22 * 60, 8 * 60)
-    assert in_window(night, at("03:00"), CET)
-    assert in_window(night, at("22:00"), CET)
-    assert in_window(night, at("07:59"), CET)
-    assert not in_window(night, at("08:00"), CET)
-    assert not in_window(night, at("21:59"), CET)
-    assert not in_window(parse_window("13:00-15:00"), at("16:00"), CET)
-    assert in_window(parse_window("13:00-15:00"), at("14:00"), CET)
-    assert not in_window(parse_window(""), at("03:00"), CET)
+    night = parse_window(NIGHT)
+    assert night == (23 * 60, 7 * 60 + 30)
+    assert in_window(night, at("03:00"), MADRID)
+    assert in_window(night, at("23:00"), MADRID)
+    assert in_window(night, at("07:29"), MADRID)
+    assert not in_window(night, at("07:30"), MADRID)
+    assert not in_window(night, at("22:59"), MADRID)
+    assert not in_window(parse_window("13:00-15:00"), at("16:00"), MADRID)
+    assert in_window(parse_window("13:00-15:00"), at("14:00"), MADRID)
+    assert parse_window("") is None
+    assert not in_window(None, at("03:00"), MADRID)
+
+
+def test_night_window_follows_tz_across_daylight_saving() -> None:
+    # 07:00 in Madrid is 06:00 UTC in winter and 05:00 UTC in summer: the window is wall-clock.
+    night = parse_window(NIGHT)
+    assert in_window(night, at("07:00"), MADRID)
+    summer = datetime.fromisoformat("2026-07-01T07:00:00+02:00").timestamp()
+    assert in_window(night, summer, MADRID)
+    assert not in_window(night, summer + 3600, MADRID)  # 08:00 in summer
 
 
 def test_missing_values_are_not_rain() -> None:
@@ -236,14 +248,53 @@ async def test_watch_when_it_already_rains(tmp_path: Path) -> None:
 
 
 async def test_watch_at_night_waits_for_the_morning(tmp_path: Path) -> None:
-    r = Rig(tmp_path / "b.db", at("07:40"), [body("07:30", [0, 0, 0, 0.4])])  # rain at 08:15
-    for _ in range(19):
+    # NIGHT_HOURS 23:00-07:30, rain due at 07:45: in the lead from 07:15, but that is night.
+    r = Rig(tmp_path / "b.db", at("07:10"), [body("07:00", [0, 0, 0, 0.4])], night=NIGHT)
+    for _ in range(20):
         await r.minute(fetch=True)
-    assert r.alerts.rows == {}  # 07:40 to 07:58: quiet
-    await r.minute(fetch=True)  # 07:59
-    await r.minute(fetch=True)  # 08:00
+    assert r.alerts.rows == {}  # 07:10 to 07:29: night, nothing is created
+    await r.minute(fetch=True)  # 07:30, the night is over and the rain is still coming
     [a] = r.active()
-    assert "15 minutos" in a.text
+    assert a.urgency == "info" and "15 minutos" in a.text
+    await r.watch.aclose()
+
+
+async def test_watch_rain_through_the_night_is_not_announced_at_dawn(tmp_path: Path) -> None:
+    # It rains from 06:00 to 08:00: at 07:30 it is already raining, so no alert.
+    r = Rig(tmp_path / "b.db", at("06:30"), [body("05:45", [0] + [0.5] * 8)], night=NIGHT)
+    for _ in range(90):
+        await r.minute(fetch=True)
+    assert r.alerts.rows == {}
+    await r.watch.aclose()
+
+
+async def test_watch_without_night_hours_has_no_night(tmp_path: Path) -> None:
+    r = Rig(tmp_path / "b.db", at("03:05"), [body("03:00", [0, 0.5])])
+    await r.minute(fetch=True)
+    assert len(r.active()) == 1
+    await r.watch.aclose()
+
+
+async def test_watch_reads_the_night_in_tz_not_in_the_forecast(tmp_path: Path) -> None:
+    # The forecast is in Madrid time (UTC+1); TZ=UTC puts 08:10 Madrid at 07:10, still night.
+    r = Rig(
+        tmp_path / "b.db", at("08:10"), [body("08:00", [0, 0.5])], night=NIGHT, tz=ZoneInfo("UTC")
+    )
+    await r.minute(fetch=True)
+    assert r.alerts.rows == {}
+    r2 = Rig(tmp_path / "c.db", at("08:10"), [body("08:00", [0, 0.5])], night=NIGHT, tz=MADRID)
+    await r2.minute(fetch=True)
+    assert len(r2.active()) == 1
+    await r.watch.aclose()
+    await r2.watch.aclose()
+
+
+async def test_watch_just_before_the_night_still_warns(tmp_path: Path) -> None:
+    # 22:50, rain at 23:15: the alert is created; the page's night mode decides how to show it.
+    r = Rig(tmp_path / "b.db", at("22:50"), [body("22:45", [0, 0, 0.5])], night=NIGHT)
+    await r.minute(fetch=True)
+    [a] = r.active()
+    assert a.key == "rain-soon-20261120-2315"
     await r.watch.aclose()
 
 
@@ -321,12 +372,6 @@ async def test_watch_run_survives_a_failed_fetch(tmp_path: Path) -> None:
 # Wiring
 
 
-def test_quiet_window_is_validated(tmp_path: Path) -> None:
-    with pytest.raises(ValueError):
-        make_settings(tmp_path, rain_soon_quiet="10pm-8am")
-    assert make_settings(tmp_path, rain_soon_quiet="").rain_soon_quiet == ""
-
-
 def test_rain_watch_needs_the_weather(app_factory: Any) -> None:
     with TestClient(app_factory()) as c:
         assert c.app.state.rain is None  # type: ignore[attr-defined]
@@ -338,6 +383,14 @@ def test_rain_watch_runs_with_the_weather(app_factory: Any) -> None:
     with TestClient(app_factory(weather_lat=41.4, weather_lon=2.2, weather_transport=t)) as c:
         rain = c.app.state.rain  # type: ignore[attr-defined]
         assert rain is not None and rain.lead_s == 30 * 60
+        assert rain.night is None and rain.tz == MADRID  # no NIGHT_HOURS: no night
+    with TestClient(
+        app_factory(
+            weather_lat=41.4, weather_lon=2.2, weather_transport=t, night_hours=NIGHT, tz="UTC"
+        )
+    ) as c:
+        rain = c.app.state.rain  # type: ignore[attr-defined]
+        assert rain.night == (23 * 60, 7 * 60 + 30) and rain.tz == ZoneInfo("UTC")
     with TestClient(
         app_factory(weather_lat=41.4, weather_lon=2.2, weather_transport=t, rain_soon=False)
     ) as c:

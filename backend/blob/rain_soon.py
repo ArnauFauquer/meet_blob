@@ -8,7 +8,8 @@ quarter starts within RAIN_SOON_LEAD_MIN, it raises an `info` alert through the 
 One alert per rain episode. An episode lasts while rain is forecast and until EPISODE_GAP_S of
 dry forecast after it, so a shower that stops and starts again, or a forecast that slips by a
 quarter on the next fetch, does not warn twice. No alert while it is already raining, or in the
-quiet window (RAIN_SOON_QUIET, local time of the place, default 22:00-08:00).
+night (NIGHT_HOURS, the same window as the page's night mode, read in the home's TZ; no night
+when it is empty). Rain still coming when the night ends is announced then.
 
 The decision is a pure function (`decide`) of the forecast, the time and the episode state, so
 the tests feed it simulated forecasts.
@@ -19,8 +20,9 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -74,7 +76,7 @@ class Quarter:
 @dataclass(frozen=True)
 class Forecast:
     quarters: list[Quarter]
-    utc_offset_s: int  # of the place, for the quiet window
+    utc_offset_s: int  # of the place, as Open-Meteo reported it
     fetched: float
 
 
@@ -105,17 +107,18 @@ def parse(body: dict[str, Any], now: float) -> Forecast:
 
 
 def parse_window(spec: str) -> tuple[int, int] | None:
-    """'22:00-08:00' to minutes of the day (start, end); empty: no window."""
+    """NIGHT_HOURS ('23:00-07:30') to minutes of the day (start, end); empty: no window."""
     if not spec:
         return None
     a, b = spec.split("-")
     return tuple(int(x[:2]) * 60 + int(x[3:]) for x in (a, b))  # type: ignore[return-value]
 
 
-def in_window(window: tuple[int, int] | None, now: float, utc_offset_s: int) -> bool:
+def in_window(window: tuple[int, int] | None, now: float, tz: tzinfo) -> bool:
+    """Whether `now` is inside the window, in the wall-clock time of `tz` (the home's TZ)."""
     if window is None:
         return False
-    local = datetime.fromtimestamp(now, timezone(timedelta(seconds=utc_offset_s)))
+    local = datetime.fromtimestamp(now, tz)
     m = local.hour * 60 + local.minute
     start, end = window
     return start <= m < end if start <= end else m >= start or m < end
@@ -127,7 +130,7 @@ def decide(
     episode_until: float,
     *,
     lead_s: float,
-    quiet: bool,
+    night: bool,
 ) -> Decision:
     """Whether to warn now, and the episode state after this look at the forecast."""
     # Rain now or just before (the forecast keeps the last quarter): the episode goes on until
@@ -143,17 +146,17 @@ def decide(
     if now < episode_until:
         # The same episode: a shower after a short break, or a forecast that slipped.
         return Decision(None, max(episode_until, nxt.start + EPISODE_GAP_S))
-    if quiet:
-        return Decision(None, episode_until)
+    if night:
+        return Decision(None, episode_until)  # the morning check announces it if still due
     minutes = round((nxt.start - now) / 300) * 5
     return Decision(Warn(nxt.start, minutes), nxt.start + EPISODE_GAP_S)
 
 
-def alert_for(w: Warn, now: float, utc_offset_s: int, lang: str) -> AlertIn:
+def alert_for(w: Warn, now: float, tz: tzinfo, lang: str) -> AlertIn:
     """The alert: a key stable for the episode (its start in local time), gone after the rain
     has been on for a while."""
     many, few, hint = TEXTS.get(lang, TEXTS["es"])
-    local = datetime.fromtimestamp(w.start, timezone(timedelta(seconds=utc_offset_s)))
+    local = datetime.fromtimestamp(w.start, tz)
     return AlertIn(
         key=f"{KEY_PREFIX}{local:%Y%m%d-%H%M}",
         source=SOURCE,
@@ -172,7 +175,8 @@ class RainWatch:
         alerts: Alerts,
         *,
         lead_min: int = 30,
-        quiet: str = "22:00-08:00",
+        night: str = "",
+        tz: tzinfo | None = None,
         model: str = "best_match",
         lang: str = "es",
         transport: httpx.AsyncBaseTransport | None = None,
@@ -180,7 +184,8 @@ class RainWatch:
     ) -> None:
         self.lat, self.lon, self.alerts = lat, lon, alerts
         self.lead_s = lead_min * 60
-        self.quiet = parse_window(quiet)
+        self.night = parse_window(night)
+        self.tz = tz or ZoneInfo("Europe/Madrid")
         self.model, self.lang = model, lang
         self.forecast: Forecast | None = None
         self.episode_until = 0.0
@@ -222,10 +227,10 @@ class RainWatch:
             now,
             self.episode_until,
             lead_s=self.lead_s,
-            quiet=in_window(self.quiet, now, f.utc_offset_s),
+            night=in_window(self.night, now, self.tz),
         )
         self.episode_until = d.episode_until
-        return alert_for(d.warn, now, f.utc_offset_s, self.lang) if d.warn else None
+        return alert_for(d.warn, now, self.tz, self.lang) if d.warn else None
 
     async def tick(self) -> None:
         a = self.check()

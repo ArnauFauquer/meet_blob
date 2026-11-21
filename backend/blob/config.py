@@ -83,11 +83,10 @@ class Settings(BaseSettings):
     weather_lon: float | None = Field(None, ge=-180, le=180)
     weather_refresh_s: float = Field(1200, ge=60)
     # Rain soon: an info alert when rain starts within RAIN_SOON_LEAD_MIN (needs the weather
-    # coordinates). Quiet window in the place's local time; RAIN_SOON_MODEL is the Open-Meteo
-    # model for the 15 minute precipitation (meteofrance_seamless is native 15 min in Catalonia).
+    # coordinates); none during NIGHT_HOURS, read in TZ. RAIN_SOON_MODEL is the Open-Meteo model
+    # for the 15 minute precipitation (meteofrance_seamless is native 15 min in Catalonia).
     rain_soon: bool = True
     rain_soon_lead_min: int = Field(30, ge=5, le=120)
-    rain_soon_quiet: str = "22:00-08:00"
     rain_soon_model: str = Field("best_match", pattern=r"^[a-z0-9_]{1,64}$")
     rain_soon_lang: Literal["es", "ca", "en"] = "es"
 
@@ -145,11 +144,11 @@ class Settings(BaseSettings):
             raise ValueError("TZ must be an IANA zone name such as Europe/Madrid") from None
         return v
 
-    @field_validator("quiet_hours", "rain_soon_quiet")
+    @field_validator("quiet_hours")
     @classmethod
     def _quiet_hours(cls, v: str) -> str:
         if v and not re.fullmatch(_HOURS, v):
-            raise ValueError("QUIET_HOURS and RAIN_SOON_QUIET must look like 22:00-07:00")
+            raise ValueError("QUIET_HOURS must look like 22:00-07:00")
         return v
 
     @field_validator("night_hours")
