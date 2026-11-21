@@ -235,6 +235,8 @@ Two data tables in the page, not in code branches:
 *   Conversation state to colour and motion: `idle` deep blue/violet with slow breathing, `listening` cyan deforming with the microphone level, `thinking` amber with slow breathing, `speaking` warm white pulsing with playback level, `error` dim grey.
 *   Alert source and urgency to shape, colour and pulse speed. Slice 4 starts with two shapes: triangle for `timer`, square for every other source. `info` is green and `urgent` is red (constants in `tables.ts`), and `urgent` pulses at twice the rate of `info` (a constant in `tables.ts`). A morph between two shapes uses `mix(sdfA, sdfB, t)` with the march step shortened to about 0.7.
 
+Pending timers (`snapshot.timers`) orbit the blob as droplets, one per timer, smaller as less time is left, warmer in the last minute. When a timer fires, its drop falls back into the body (smooth-min) before the alert shape takes over. They replace the text countdown. Details in `docs/notes/look.md`, "Timer droplets".
+
 The shader is one fullscreen quad. Transparency is a fresnel term over a procedural dark environment, tinted per state. There is no refraction pass. Tablet cost controls: render at 0.75 scale, exit early outside a bounding sphere, cap idle at 30 fps, handle `webglcontextlost`.
 
 ### WebSocket protocol
@@ -465,7 +467,7 @@ Source: the "Alternatives Weighed" section and the Prior Art section of `docs/de
 
 *   **Pros**: One operator for both morphs and merging.
 *   **Cons**: Smooth-min is a union. Sphere and cube merge into a larger bulge instead of turning into a cube.
-*   **Decision and rationale**: Rejected by author (accepted recommendation): morphs use `mix(sdfA, sdfB, t)`. Smooth-min returns only if droplets are added to the thinking state later.
+*   **Decision and rationale**: Rejected by author (accepted recommendation): morphs use `mix(sdfA, sdfB, t)`. Smooth-min returns only if droplets are added to the thinking state later. (It returned for the timer droplets: each drop joins the body with smooth-min, on top of the `mix()` morph; see `docs/notes/look.md`.)
 
 ### Alternative M: True refraction for the glass look
 
@@ -562,7 +564,7 @@ Source: the "Alternatives Weighed" section and the Prior Art section of `docs/de
 *   **Sentence streaming.** Flush the first sentence at the first `.`, `!` or `?` followed by whitespace, send the rest as one chunk, then add a real splitter and ordered playback.
 *   **Filler phrase.** A short spoken line if Hermes has not started answering after about 4 s, language taken from the speech model, cancelled by the first token, never stored in history.
 *   **Catalan speech.** Piper Catalan as a stopgap behind `voice_for("ca")`, then Matxa + alVoCat.
-*   **Thinking droplets.** Small droplets orbiting the sphere, using smooth-min, once the `mix()` morph works.
+*   **Thinking droplets.** Small droplets orbiting the sphere, using smooth-min, once the `mix()` morph works. Pending timers now orbit as droplets (`web/src/render/droplets.ts`); the thinking state could reuse them.
 *   **Stopwatch.** A separate `kind=stopwatch` with a `started_at`, kept out of the alert list and answered by speech on request.
 *   **Second wake phrase** ("hola blob") as a second parallel model.
 *   **Voice acknowledgement** of alerts, and alert text injected into the Hermes system message so Hermes can answer questions about open alerts.
