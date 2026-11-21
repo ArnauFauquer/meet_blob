@@ -12,6 +12,8 @@
 // a follow-up. A name containing "debug" gets debug_audio=true (wake_clip frames
 // are logged as mock_wake_clip and dropped). Alerts (S4): POST/GET/DELETE /alerts with MOCK_ALERT_TOKEN; an
 // alert_read of a key starting with "ttsfail" answers error{bad_message} (synthesis failure).
+// Presence: POST/GET/DELETE /presence with MOCK_ALERT_TOKEN, sent to every page like the real backend;
+// a name containing "presence" gets presence_sleep_s=4 so the dark screen comes quickly.
 // Run: node e2e/mock-backend.ts (PORT, MOCK_ALERT_TOKEN, MOCK_STATIC).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -99,6 +101,12 @@ function setConv(next: typeof conv, id: number | null) {
     send(c, snapshot());
   }
 }
+let presence: { present: boolean | null; at: number | null } = { present: null, at: null };
+const presenceMsg = () => ({
+  type: 'presence',
+  present: presence.present,
+  since_s: presence.at === null ? null : Math.round((Date.now() - presence.at) / 100) / 10,
+});
 function broadcastSnapshot() {
   for (const c of conns) if (c.hello) send(c, snapshot());
 }
@@ -184,6 +192,7 @@ function onMessage(c: Conn, data: RawData, isBinary: boolean) {
     c.device = c.session;
     send(c, { type: 'hello_ok', version: c.device === 'version' ? 'mock-other-version' : m.version, ok: true });
     send(c, snapshot());
+    if (presence.present !== null) send(c, presenceMsg());
     if (c.device === 'drop' && !dropped.has(c.device)) {
       dropped.add(c.device);
       setTimeout(() => c.ws.terminate(), 300);
@@ -303,6 +312,7 @@ async function serve(req: IncomingMessage, res: ServerResponse) {
         silence_rms: 0.01,
         debug_audio: device.includes('debug'),
         night: device.includes('night') ? nightAroundNow() : null,
+        presence_sleep_s: device.includes('presence') ? 4 : 600,
       }),
     );
   }
@@ -312,6 +322,7 @@ async function serve(req: IncomingMessage, res: ServerResponse) {
     return res.end(JSON.stringify(MOCK_WEATHER));
   }
   if (url.pathname === '/alerts' || url.pathname.startsWith('/alerts/')) return alertsApi(req, res, url);
+  if (url.pathname === '/presence') return presenceApi(req, res);
   const rel = normalize(url.pathname === '/' ? '/index.html' : url.pathname).replace(/^(\.\.[/\\])+/, '');
   try {
     const body = await readFile(join(STATIC, rel));
@@ -322,6 +333,30 @@ async function serve(req: IncomingMessage, res: ServerResponse) {
   } catch {
     res.writeHead(404).end('not found');
   }
+}
+
+// The real /presence API (docs/presence.md), without the 422 details.
+async function presenceApi(req: IncomingMessage, res: ServerResponse) {
+  if (req.headers.authorization !== `Bearer ${ALERT_TOKEN}`) return res.writeHead(401).end();
+  res.setHeader('content-type', 'application/json');
+  const out = () => res.end(JSON.stringify((({ present, since_s }) => ({ present, since_s }))(presenceMsg())));
+  if (req.method === 'GET') return out();
+  if (req.method === 'DELETE') presence = { present: null, at: null };
+  else if (req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      const chunks: Buffer[] = [];
+      for await (const ch of req) chunks.push(ch as Buffer);
+      body = JSON.parse(Buffer.concat(chunks).toString());
+    } catch {
+      return res.writeHead(422).end();
+    }
+    if (typeof body.present !== 'boolean') return res.writeHead(422).end();
+    // Like the backend: every "someone" is fresh; a repeated "nobody" keeps its time.
+    if (body.present || presence.present !== false) presence = { present: body.present, at: Date.now() };
+  } else return res.writeHead(405).end();
+  for (const c of conns) if (c.hello) send(c, presenceMsg());
+  return req.method === 'DELETE' ? res.writeHead(204).end() : out();
 }
 
 // A small subset of the real /alerts API (docs/alerts.md): enough for the e2e flows.

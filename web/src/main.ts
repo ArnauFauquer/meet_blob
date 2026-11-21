@@ -14,6 +14,7 @@ import {
 } from './config';
 import { Diag, onPress } from './diag';
 import { FaultLine } from './fault';
+import { PresenceMachine, showScreen } from './presence';
 import type { AlertItem, ConvState, ServerMessage, TimerItem, TurnDoneMsg } from './protocol';
 import { BlobRenderer, type FrameInput } from './render/blob';
 import { CLOCK_AFTER_MS, CLOCK_TURN_MS, WEATHER_TURN_MS, type Sky } from './render/tables';
@@ -178,13 +179,14 @@ function view(): View {
 }
 
 let idleSince = performance.now(); // start of the current unbroken idle stretch
+const presence = new PresenceMachine(() => deviceConfig.presence_sleep_s * 1000); // room sensor: rest and sleep
 let weather: Weather | null = null;
 let stripRoom = 0.25; // share of the screen's height the weather strip takes at the bottom (measured)
 
 // After CLOCK_AFTER_MS of idle the blob rests: as a clock, taking turns with
 // the sky outside when the backend has the weather.
 function rest(now: number): 'none' | 'clock' | 'weather' {
-  const ms = now - idleSince - CLOCK_AFTER_MS;
+  const ms = presence.restMs(now, idleSince, CLOCK_AFTER_MS);
   if (ms < 0 || night.on) return 'none'; // at night the blob sleeps instead
   return weather ? restShows(ms, CLOCK_TURN_MS, WEATHER_TURN_MS) : 'clock';
 }
@@ -193,6 +195,7 @@ function frameInput(): FrameInput {
   const v = view();
   const now = performance.now();
   if (v !== 'idle') idleSince = now;
+  showScreen(presence.screen(now, idleSince, v === 'idle'), renderer);
   faults.set('mic_denied', capture.status === 'denied');
   const level =
     v === 'listening' ? capture.level() : v === 'speaking' || v === 'error' || v === 'alert' ? playback.level() : 0;
@@ -387,6 +390,7 @@ const sock = new BlobSocket({
     faults.set('socket_down', s === 'down' || (s === 'connecting' && everOpen));
     if (s === 'signed_out') signedOut();
     if (s !== 'open') {
+      presence.report(null, null, performance.now()); // unknown until the backend says again
       // The backend cancels the turn when the socket closes.
       reader.reset();
       listenAfterRead = false;
@@ -462,6 +466,9 @@ function handle(m: ServerMessage, binary: ArrayBuffer | null): void {
       turn.onError(m);
       if (m.code === 'not_ready') overlaySince = performance.now(); // models still loading: grey blob
       break;
+    case 'presence':
+      presence.report(m.present, m.since_s, performance.now());
+      break;
     case 'hello_ok':
     case 'pong':
       break;
@@ -478,6 +485,7 @@ function onTap(): void {
   }
   const locked = audioLocked();
   void ctx.resume(); // on every tap (design: Sound targets)
+  if (presence.tap(performance.now(), idleSince, view() === 'idle')) return; // the dark screen only wakes
   if (enroll) return; // enrollment: a tap only unlocks the audio
   const action = decideTap({
     audioLocked: locked,
@@ -565,6 +573,7 @@ const diag = new Diag($('diag'), () => ({
       }
     : 'off (tap only)',
   vad: turnDeps.vad ? { listening: vad.active, p: +vad.lastP.toFixed(2) } : 'off',
+  presence: { present: presence.present, screen: presence.screen(performance.now(), idleSince, view() === 'idle') },
 }));
 
 onPress(document.body, onTap, () => diag.show());
@@ -666,6 +675,9 @@ window.blobDebug = {
   },
   get handsFree() {
     return { on: handsFree, wakeReady, vad: !!turnDeps.vad, wakeOn, followup: followup.active, threshold: wakeCfg?.threshold, ...wakeStats };
+  },
+  get screen() {
+    return { presence: presence.present, asleep: renderer?.dark ?? false, dim: renderer?.dim ?? 1, maxFps: renderer?.maxFps ?? Infinity, drawn: renderer?.drawn ?? 0 };
   },
   get turnKind() {
     return turn.kind;

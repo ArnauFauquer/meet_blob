@@ -19,6 +19,8 @@ export interface DeviceConfig {
   silence_rms: number;
   debug_audio: boolean; // DEBUG_AUDIO_DIR is set on the backend: wake_clip audio is kept
   night: NightHours | null; // night mode (NIGHT_HOURS), browser local time; null: off
+  // Presence wake: with nobody in the room the screen goes dark this long after the last activity.
+  presence_sleep_s: number;
 }
 
 export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
@@ -31,6 +33,8 @@ export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
   silence_rms: SILENCE_RMS,
   debug_audio: false,
   night: null,
+  // Presence wake
+  presence_sleep_s: 600,
 };
 
 export function wsUrl(loc: Pick<Location, 'protocol' | 'host'> = location): string {

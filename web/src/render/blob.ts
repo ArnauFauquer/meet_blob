@@ -43,6 +43,7 @@ const EASE_S = 0.6; // time constant of the state crossfade
 // Dimming fades: a quick brighten (a tap must feel instant), a slow fall asleep.
 const DIM_UP_S = 0.3;
 const DIM_DOWN_S = 2.5;
+const BLACK = 0.002; // a dim of 0 snaps to exact black below this (the shader drops its dither at 0)
 // Quality tiers (QUALITY define in blob.frag): 2 full, 1 fewer march steps,
 // lobes and lava samples, 0 minimal. The page starts at 2 and steps down,
 // never up, when the moving average of the frame interval stays above SLOW_MS.
@@ -198,6 +199,7 @@ export class BlobRenderer {
   private readonly fpsCaps = new Map<string, number>();
   private dimShown = 1; // eased towards `dim`
   private sleepW = 0; // 0..1 weight of the sleeping blob (fewer glances)
+  drawn = 0; // frames drawn so far (e2e: the dark screen draws almost none)
   private avgMs = 0;
   private slowS = 0;
 
@@ -301,6 +303,12 @@ export class BlobRenderer {
     return Math.min(Infinity, ...this.fpsCaps.values());
   }
 
+  // A source dims to 0 and the last frame drawn was exact black: drawing more
+  // changes nothing on screen (presence caps the frame rate from here).
+  get dark(): boolean {
+    return this.dim <= 0 && this.dimShown === 0;
+  }
+
   get uniforms(): Record<string, { value: unknown }> {
     return this.material.uniforms;
   }
@@ -371,6 +379,7 @@ export class BlobRenderer {
     this.adaptQuality(dt);
     this.advance(dt, fi);
     this.renderer.render(this.scene, this.camera);
+    this.drawn++;
   }
 
   // Simple moving average of the frame interval; a long slow stretch drops one tier.
@@ -443,6 +452,7 @@ export class BlobRenderer {
     u.uGlow.value = c.glow;
     const dim = this.dim;
     this.dimShown += (dim - this.dimShown) * (1 - Math.exp(-dt / (dim > this.dimShown ? DIM_UP_S : DIM_DOWN_S)));
+    if (dim <= 0 && this.dimShown < BLACK) this.dimShown = 0;
     u.uBright.value = c.bright;
     u.uDim.value = this.dimShown;
     u.uFlash.value = this.flashT;

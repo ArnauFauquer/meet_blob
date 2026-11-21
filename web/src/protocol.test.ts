@@ -43,6 +43,7 @@ const serverSamples: { [K in ServerMessage['type']]: Extract<ServerMessage, { ty
   },
   error: { type: 'error', code: 'busy' },
   pong: { type: 'pong' },
+  presence: { type: 'presence', present: true, since_s: 0 },
 };
 
 type Spec = Record<string, { slice: string; binary?: string; fields: Record<string, string> }>;
