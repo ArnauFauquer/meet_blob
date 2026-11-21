@@ -66,6 +66,8 @@ Environment the chart must provide:
 | `PUBLIC_URL` | values (`https://blob.faukinator.com`) |
 | `OIDC_ISSUER` | values (Pocket ID's public URL, the browser must reach the same URL) |
 | `OIDC_CLIENT_ID` | values (from the Pocket ID client) |
+| `WEATHER_LAT`, `WEATHER_LON` | values (Barcelona); the idle weather and the rain alert are off without them |
+| `RAIN_SOON_MODEL` | values (`meteofrance_seamless`: native 15 minute rain in Catalonia, see [docs/rain.md](../docs/rain.md)) |
 | `HERMES_KEY`, `ALERT_TOKEN`, `OIDC_CLIENT_SECRET` | Secret `blob-secrets` (Terraform); `DEVICE_TOKEN` is no longer read |
 
 Blob must reach `OIDC_ISSUER` from inside the cluster (discovery, keys and the token request).

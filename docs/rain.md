@@ -58,8 +58,10 @@ forecast. For Barcelona the default `best_match` gives smooth, interpolated-look
 (0.1 mm in every quarter of a 0.5 mm hour, rain starting a quarter before its hour). Météo-France
 AROME HD covers Catalonia: `RAIN_SOON_MODEL=meteofrance_seamless` gives native quarters for the
 next ~2 days (null after that, which the rule treats as dry; only the next 30 minutes matter).
-The default stays `best_match` because it works anywhere; set `meteofrance_seamless` for a home
-in Catalonia or France.
+The code's default stays `best_match` because it works anywhere. The home deployment sets
+`RAIN_SOON_MODEL=meteofrance_seamless` (home_lab, `faukinator/blob/values.yaml`, `env:`, next to
+`WEATHER_LAT` and `WEATHER_LON`). A home elsewhere in Catalonia or France should do the same.
+The setting is ignored by an image without this feature, so it can go in before the image.
 
 The idle screen's weather (`/weather`, `weather.py`) is a separate fetch and is not changed.
 
@@ -72,7 +74,7 @@ Off unless `WEATHER_LAT` and `WEATHER_LON` are set (the same place as the idle w
 | `RAIN_SOON` | `true` | `false` turns the alert off |
 | `RAIN_SOON_LEAD_MIN` | `30` | 5 to 120 |
 | `RAIN_SOON_QUIET` | `22:00-08:00` | no alert in this window, the place's local time; empty: always |
-| `RAIN_SOON_MODEL` | `best_match` | an Open-Meteo `models` value |
+| `RAIN_SOON_MODEL` | `best_match` | an Open-Meteo `models` value; the home deployment uses `meteofrance_seamless` |
 | `RAIN_SOON_LANG` | `es` | `es`, `ca` or `en` |
 
 ## Tests
