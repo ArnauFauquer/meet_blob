@@ -25,6 +25,7 @@ import type { Detector, WakeConfig } from './wake/detector';
 import { PcmRing, PhraseSegmenter, ScoreHistory } from './wake/clips';
 import { FollowUp, gateReason, wakeAllowed } from './wake/wake-gate';
 import { MicStats, PeakTracker, type WakePeak } from './wake/wake-log';
+import { NightMode, shownAlerts } from './night';
 import { checkVersion, entryBundle } from './version';
 import { keepAwake } from './wakelock';
 import { WEATHER_POLL_MS, fetchWeather, restShows, skyOf, stripHtml, type Weather } from './weather';
@@ -155,8 +156,25 @@ const alarm = new Alarm({
 const turnPlaying = () => playback.playing && !reader.reading;
 const overlay = () => overlayActive(overlaySince, performance.now(), turnPlaying());
 
+// Night mode: the blob sleeps (dim, slow) and only urgent alerts show and ring.
+const night = new NightMode({
+  hours: () => deviceConfig.night,
+  apply(dim, fps) {
+    renderer?.setDim('night', dim);
+    renderer?.setMaxFps('night', fps);
+    document.body.classList.toggle('night', dim < 1);
+  },
+  onChange: () => checkChime(),
+});
+const shown = () => shownAlerts(alerts, night.on);
+const nightTick = () => {
+  const v = view();
+  night.update((v !== 'idle' && v !== 'offline' && v !== 'alert') || alarm.ringing || reader.reading);
+};
+setInterval(nightTick, 250);
+
 function view(): View {
-  return computeView({ online: socketStatus === 'open', conv, playing: turnPlaying(), overlay: overlay(), alerts });
+  return computeView({ online: socketStatus === 'open', conv, playing: turnPlaying(), overlay: overlay(), alerts: shown() });
 }
 
 let idleSince = performance.now(); // start of the current unbroken idle stretch
@@ -167,7 +185,7 @@ let stripRoom = 0.25; // share of the screen's height the weather strip takes at
 // the sky outside when the backend has the weather.
 function rest(now: number): 'none' | 'clock' | 'weather' {
   const ms = now - idleSince - CLOCK_AFTER_MS;
-  if (ms < 0) return 'none';
+  if (ms < 0 || night.on) return 'none'; // at night the blob sleeps instead
   return weather ? restShows(ms, CLOCK_TURN_MS, WEATHER_TURN_MS) : 'clock';
 }
 
@@ -183,10 +201,11 @@ function frameInput(): FrameInput {
   return {
     view: v,
     level,
-    alert: v === 'alert' ? topAlert(alerts) : null,
+    alert: v === 'alert' ? topAlert(shown()) : null,
     clock: r !== 'none' ? new Date() : null,
     weather: sky,
     room: weather && r !== 'none' ? stripRoom : 0,
+    sleep: night.asleep,
   };
 }
 
@@ -213,11 +232,11 @@ setInterval(() => void pollWeather(), WEATHER_POLL_MS);
 // while a turn is active (design, Display rules). It stops early on a tap, a
 // turn, or once the alert is gone.
 function checkChime(): void {
-  alarm.update(alerts.map((a) => a.key));
+  alarm.update(shown().map((a) => a.key)); // an info alert ringing at nightfall goes quiet
   if (!configLoaded) return; // the sound flag is not known yet
   const active = turnBusy();
   if (active) alarm.stop();
-  if (chime.update(alerts, active)) alarm.start(chime.fired);
+  if (chime.update(alerts, active, night.on)) alarm.start(chime.fired);
 }
 
 // After a reply with followup=true has played, listen once more without the wake word.
@@ -273,9 +292,11 @@ function onWakeScore(score: number): void {
   logPeak(peaks?.score(score, performance.now()) ?? null);
   if (enroll) return showEnroll(); // enrollment: scores only, no turns
   if (!wakeCfg || score < wakeCfg.threshold || !gateOpen()) return;
+  night.poke();
+  nightTick();
   logPeak(peaks?.flush(performance.now()) ?? null); // the detector stops now: report this attempt first
   // An alert waiting (its alarm may be ringing): read it first, then listen.
-  const a = view() === 'alert' ? topAlert(alerts) : null;
+  const a = view() === 'alert' ? topAlert(shown()) : null;
   if (a) {
     alarm.stop();
     reader.read(a.key);
@@ -449,6 +470,8 @@ function handle(m: ServerMessage, binary: ArrayBuffer | null): void {
 
 function onTap(): void {
   alarm.stop(); // any tap silences a ringing alert
+  night.poke(); // and wakes a sleeping blob
+  nightTick();
   if (diag.open) {
     diag.hide();
     return;
@@ -466,7 +489,7 @@ function onTap(): void {
   });
   switch (action) {
     case 'read_alert': {
-      const a = topAlert(alerts);
+      const a = topAlert(shown());
       if (a) reader.read(a.key);
       break;
     }
@@ -526,6 +549,7 @@ const diag = new Diag($('diag'), () => ({
     : 'none',
   device_config: deviceConfig,
   alerts: alerts.map((a) => `${a.key}:${a.source}:${a.urgency}`).join(' ') || 'none',
+  night: deviceConfig.night ? { on: night.on, asleep: night.asleep, dim: renderer?.dim, max_fps: renderer?.maxFps } : 'off',
   wake: handsFree
     ? {
         phrase: wakeCfg?.phrase,
@@ -598,14 +622,19 @@ window.blobDebug = {
     renderer.autoQuality = false;
     renderer.setQuality(q);
   },
-  setDim(v: number) {
-    if (renderer) renderer.dim = Math.max(0, Math.min(1, v));
+  // setDim(v) for the film strip, or setDim(source, v) like night mode does.
+  setDim(a: number | string, b?: number) {
+    if (typeof a === 'string') renderer?.setDim(a, b ?? 1);
+    else renderer?.setDim('debug', a);
+  },
+  get night() {
+    return { on: night.on, asleep: night.asleep, dim: renderer?.dim ?? 1, maxFps: renderer?.maxFps ?? Infinity, shown: shown().map((a) => a.key) };
   },
   // `clock`: a local time such as '2026-01-01T09:41', to draw the idle clock.
   // `alert`: the top alert drawn when `v` is 'alert'.
   // `weather`: the sky drawn when `v` is 'idle' (before the clock).
-  step(dtS: number, v: View, level: number, draw: boolean, clock?: string, alert?: FrameInput['alert'], weather?: Sky) {
-    renderer?.step(dtS, { view: v, level, clock: clock ? new Date(clock) : null, alert, weather }, draw);
+  step(dtS: number, v: View, level: number, draw: boolean, clock?: string, alert?: FrameInput['alert'], weather?: Sky, sleep?: boolean) {
+    renderer?.step(dtS, { view: v, level, clock: clock ? new Date(clock) : null, alert, weather, sleep }, draw);
   },
   // Pretends the page has been idle for `ms` (the clock appears after CLOCK_AFTER_MS).
   idleFor(ms: number) {
@@ -615,7 +644,7 @@ window.blobDebug = {
     return alerts.map((a) => a.key);
   },
   get topAlert() {
-    return topAlert(alerts)?.key ?? null;
+    return topAlert(shown())?.key ?? null;
   },
   get shape() {
     const u = renderer?.uniforms;
@@ -650,8 +679,8 @@ window.blobDebug = {
   },
   // Screenshot scripts only. No view: hold the current frame (a mid-morph
   // capture). With a view: stop and restart that view's motion at zero (film strip).
-  freeze(v?: View, clock?: string, alert?: FrameInput['alert'], sky?: Sky) {
-    if (v) renderer?.freeze(v, clock ? new Date(clock) : null, alert, sky);
+  freeze(v?: View, clock?: string, alert?: FrameInput['alert'], sky?: Sky, sleep?: boolean) {
+    if (v) renderer?.freeze(v, clock ? new Date(clock) : null, alert, sky, sleep);
     else renderer?.stop();
   },
 };

@@ -53,6 +53,23 @@ for (const [w, h] of [
   });
 }
 
+// Night mode (the mock gives devices named with "night" a night around now):
+// the sleeping blob.
+for (const [w, h] of [
+  [1280, 800],
+  [1024, 768],
+]) {
+  test(`night at ${w}x${h}`, async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: w, height: h });
+    await openBlob(page, 'e2e-night');
+    await waitView(page, 'idle');
+    await fullQuality(page);
+    await expect.poll(() => dbg<{ asleep: boolean }>(page, 'night').then((n) => n?.asleep)).toBe(true);
+    await shot(page, 'idle', `night-${w}x${h}`, 12_000); // the fade to NIGHT_DIM takes a few seconds
+  });
+}
+
 test('PWA icons from the idle blob', async ({ page }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 512, height: 512 });

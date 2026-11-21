@@ -271,6 +271,12 @@ const MOCK_WEATHER = {
   updated: 0,
 };
 
+// Devices named with "night": a night from an hour ago to an hour from now (local time).
+function nightAroundNow(): { start: string; end: string } {
+  const hm = (ms: number) => new Date(Date.now() + ms).toTimeString().slice(0, 5);
+  return { start: hm(-3_600_000), end: hm(3_600_000) };
+}
+
 async function serve(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? '/', 'http://x');
   if (url.pathname === '/healthz') {
@@ -296,6 +302,7 @@ async function serve(req: IncomingMessage, res: ServerResponse) {
         listen_no_speech_s: 8,
         silence_rms: 0.01,
         debug_audio: device.includes('debug'),
+        night: device.includes('night') ? nightAroundNow() : null,
       }),
     );
   }
