@@ -1,10 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { ALERT_COLOR, CLOCK_AFTER_MS, CLOCK_LOOK, SHAPE, STATE_LOOK, alertLook, alertShape, clockDigits } from './tables';
+import { ALERT_COLOR, CLOCK_AFTER_MS, CLOCK_LOOK, SHAPE, STATE_LOOK, alertLook, alertShape, alertSky, clockDigits, skyParts, weatherLook } from './tables';
 
 describe('alert table', () => {
   it('timer is a triangle, every other source a square', () => {
     expect(alertShape('timer')).toBe(SHAPE.triangle);
     for (const s of ['calendar', 'homeassistant', 'hermes', 'anything']) expect(alertShape(s)).toBe(SHAPE.square);
+  });
+  it('rain soon is the idle rain cloud with falling drops, not a square', () => {
+    expect(alertShape('rain')).toBe(SHAPE.weather);
+    const sky = alertSky('rain');
+    expect(sky).toEqual({ kind: 'rain', day: true });
+    const parts = skyParts(sky!);
+    expect(parts.cloud).toBe(1);
+    expect(parts.fall).toBe(1); // the drops fall below the cloud
+    expect(parts.snow).toBe(0);
+    for (const s of ['timer', 'calendar', 'homeassistant']) expect(alertSky(s)).toBeNull();
+  });
+  it('rain soon keeps the calm alert colour and breath, with the rain face', () => {
+    const look = alertLook('info', 'rain');
+    expect(look.color).toEqual(ALERT_COLOR.info);
+    expect(look.breathHz).toBe(alertLook('info').breathHz);
+    expect(look.gazeY).toBe(weatherLook({ kind: 'rain', day: true }).gazeY); // looks up at its drops
+    expect(look.gazeY).toBeGreaterThan(0);
   });
   it('info is green, urgent is red', () => {
     const [ir, ig] = alertLook('info').color;

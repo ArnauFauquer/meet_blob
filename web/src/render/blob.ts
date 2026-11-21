@@ -23,6 +23,7 @@ import {
   SLEEP_LOOK,
   alertLook,
   alertShape,
+  alertSky,
   clockDigits,
   lobes,
   lookFor,
@@ -65,7 +66,6 @@ const rnd = (n: number, k: number) => (Math.sin(n * 91.345 + k * 47.853) * 43758
 const SQUASH_HZ = 2.6;
 const SQUASH_DAMP = 0.22; // damping ratio: a few visible jiggles
 const HOP = 0.22; // morph hop height (the blob radius is 0.78)
-const isAlertShape = (s: number) => s === SHAPE.triangle || s === SHAPE.square;
 const LEAN_HZ = 2.2;
 
 // Mouth shapes while speaking, one per syllable: half width, opening (times
@@ -132,8 +132,13 @@ export interface FrameInput {
   sleep?: boolean; // night mode, nothing going on: the idle blob sleeps (darker, stiller, eyes half shut)
 }
 
+// The sky to draw: the alert's (rain soon), else the idle weather.
+function skyOf(i: FrameInput): Sky | null {
+  return (i.view === 'alert' && i.alert ? alertSky(i.alert.source) : null) ?? i.weather ?? null;
+}
+
 function targetOf(i: FrameInput): { look: Look; shape: number } {
-  if (i.view === 'alert' && i.alert) return { look: alertLook(i.alert.urgency), shape: alertShape(i.alert.source) };
+  if (i.view === 'alert' && i.alert) return { look: alertLook(i.alert.urgency, i.alert.source), shape: alertShape(i.alert.source) };
   if (i.view === 'idle' && i.weather) return { look: weatherLook(i.weather), shape: SHAPE.weather };
   if (i.view === 'idle' && i.clock) return { look: CLOCK_LOOK, shape: SHAPE.clock };
   if (i.view === 'idle' && i.sleep) return { look: SLEEP_LOOK, shape: SHAPE.sphere };
@@ -335,7 +340,8 @@ export class BlobRenderer {
     this.stop();
     const { look, shape } = targetOf({ view, level: 0, clock, alert, weather, sleep });
     this.mouth = newMouth();
-    if (weather) this.sky = skyParts(weather);
+    const sky = skyOf({ view, level: 0, alert, weather });
+    if (sky) this.sky = skyParts(sky);
     this.fallT = 0;
     this.boltT = 3;
     this.skyShown = shape === SHAPE.weather;
@@ -349,7 +355,7 @@ export class BlobRenderer {
     this.blinkT = 0;
     this.blinkN = 1;
     Object.assign(this, { t: 0, squash: { x: 0, v: 0 }, twirl: newTwirl(), lastView: view, actor: new Actor(), actW: 0, moodW: 0, held: rest(), lean: 0, leanV: 0, lastX: 0, lastVx: 0 });
-    this.alertW = isAlertShape(shape) ? 1 : 0;
+    this.alertW = view === 'alert' && alert ? 1 : 0;
     this.clockW = shape === SHAPE.clock ? 1 : 0;
     this.restW = shape === SHAPE.clock || shape === SHAPE.weather ? 1 : 0;
     this.restY = 0;
@@ -395,7 +401,7 @@ export class BlobRenderer {
   }
 
   private advance(dt: number, fi: FrameInput): void {
-    if (fi.weather && this.material.defines.WEATHER !== 1) {
+    if (skyOf(fi) && this.material.defines.WEATHER !== 1) {
       this.material.defines.WEATHER = 1; // one shader rebuild, the first time the sky shows
       this.material.needsUpdate = true;
     }
@@ -506,8 +512,9 @@ export class BlobRenderer {
     const showing = this.morph.a === SHAPE.weather || this.morph.b === SHAPE.weather;
     const shown = this.skyShown;
     this.skyShown = showing;
-    if (fi.weather) {
-      const to = skyParts(fi.weather);
+    const sky = skyOf(fi);
+    if (sky) {
+      const to = skyParts(sky);
       const k = shown ? 1 - Math.exp(-dt / 0.8) : 1; // coming on screen: take the new sky at once
       for (const key of Object.keys(to) as (keyof SkyParts)[]) this.sky[key] += (to[key] - this.sky[key]) * k;
     }
@@ -516,7 +523,7 @@ export class BlobRenderer {
     (u.uSky.value as Vector4).set(s.sun, s.moon, s.cloud, s.size);
     (u.uFall.value as Vector3).set(s.fall, s.snow, this.fallT);
     (u.uFaceT.value as Vector3).set(s.faceX, s.faceY, s.faceS);
-    if (fi.weather?.kind !== 'storm' || this.morph.a !== SHAPE.weather || this.morph.b !== SHAPE.weather) return;
+    if (sky?.kind !== 'storm' || this.morph.a !== SHAPE.weather || this.morph.b !== SHAPE.weather) return;
     this.boltT -= dt;
     if (this.boltT <= 0) {
       this.flashT = 1;
@@ -543,7 +550,8 @@ export class BlobRenderer {
     const m = this.morph;
     const t = (this.t += dt);
     const k = 1 - Math.exp(-dt / 0.3);
-    this.alertW += ((isAlertShape(shape) ? 1 : 0) - this.alertW) * k;
+    const alerting = fi.view === 'alert' && !!fi.alert; // any alert shape, the rain cloud too
+    this.alertW += ((alerting ? 1 : 0) - this.alertW) * k;
     this.clockW += ((shape === SHAPE.clock ? 1 : 0) - this.clockW) * k;
     this.restW += ((shape === SHAPE.clock || shape === SHAPE.weather ? 1 : 0) - this.restW) * k;
     // The resting shape centres itself in the free space above the strip and
@@ -555,7 +563,9 @@ export class BlobRenderer {
     const fit = Math.min(1, (hi - lo) / (top - bottom));
     const ke = 1 - Math.exp(-dt / 0.6);
     this.restFit += (fit - this.restFit) * ke;
-    this.restY += ((fi.room ? (hi + lo) / 2 - (fit * (top + bottom)) / 2 : 0) - this.restY) * ke;
+    // A sky without the strip (the rain alert) still centres itself: its drops need room below.
+    const centred = fi.room || shape === SHAPE.weather;
+    this.restY += ((centred ? (hi + lo) / 2 - (fit * (top + bottom)) / 2 : 0) - this.restY) * ke;
 
     // Kicks: a crouch before a morph jumps, a landing after it, a small
     // jiggle on any other change of view.
@@ -577,7 +587,7 @@ export class BlobRenderer {
       ? null
       : shape === SHAPE.clock
         ? 'clock'
-        : isAlertShape(shape)
+        : alerting
           ? fi.alert?.urgency === 'urgent' ? 'urgent' : 'info'
           : sleeping ? 'sleep' : fi.view === 'idle' || fi.view === 'thinking' ? fi.view : null;
     const { pose: live, kick } = this.actor.step(dt, mood);

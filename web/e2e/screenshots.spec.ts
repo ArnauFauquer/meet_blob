@@ -114,3 +114,25 @@ test('alert shapes and a morph at 1280x800', async ({ page, request }) => {
     await alerts.cleanup();
   }
 });
+
+// Rain soon (docs/rain.md): the idle sky's rain cloud in the alert's green, its drops falling.
+for (const [w, h] of [
+  [1280, 800],
+  [800, 1280],
+]) {
+  test(`rain soon alert at ${w}x${h}`, async ({ page, request }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: w, height: h });
+    const alerts = alertSource(request);
+    try {
+      await openBlob(page, 'e2e-shots');
+      await waitView(page, 'idle');
+      await fullQuality(page);
+      await alerts.post('rain-soon', { source: 'rain', urgency: 'info', text: 'Empieza a llover en 20 minutos.' });
+      await expect.poll(async () => { const s = await shape(page); return s?.a === 4 && s.mix === 0; }, { timeout: 20_000 }).toBe(true);
+      await shot(page, 'alert', `alert-rain-info-${w}x${h}`, 3000);
+    } finally {
+      await alerts.cleanup();
+    }
+  });
+}

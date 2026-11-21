@@ -82,6 +82,13 @@ class Settings(BaseSettings):
     weather_lat: float | None = Field(None, ge=-90, le=90)
     weather_lon: float | None = Field(None, ge=-180, le=180)
     weather_refresh_s: float = Field(1200, ge=60)
+    # Rain soon: an info alert when rain starts within RAIN_SOON_LEAD_MIN (needs the weather
+    # coordinates); none during NIGHT_HOURS, read in TZ. RAIN_SOON_MODEL is the Open-Meteo model
+    # for the 15 minute precipitation (meteofrance_seamless is native 15 min in Catalonia).
+    rain_soon: bool = True
+    rain_soon_lead_min: int = Field(30, ge=5, le=120)
+    rain_soon_model: str = Field("best_match", pattern=r"^[a-z0-9_]{1,64}$")
+    rain_soon_lang: Literal["es", "ca", "en"] = "es"
 
     # Presence wake: once the room's sensor says nobody is there (POST /presence), the idle blob
     # rests as the clock and the screen goes dark this many seconds after the last activity.
