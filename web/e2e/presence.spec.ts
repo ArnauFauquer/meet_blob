@@ -88,3 +88,22 @@ test('DELETE /presence goes back to no sensor: the screen lights up', async ({ p
   await request.delete('/presence', { headers });
   await waitAsleep(page, false);
 });
+
+test('at night: nobody there is black, someone there is the sleeping night blob, a true does not wake the face', async ({ page, request }) => {
+  const night = () => dbg<{ asleep: boolean; dim: number; maxFps: number }>(page, 'night');
+  await openBlob(page, 'e2e-night-presence'); // the mock gives "night" devices a night around now
+  await waitView(page, 'idle');
+  await expect.poll(async () => (await night())?.asleep, { message: 'night blob asleep' }).toBe(true);
+  expect(await night()).toMatchObject({ dim: 0.2, maxFps: 10 });
+
+  await report(request, false);
+  await waitAsleep(page, true);
+  expect(await night()).toMatchObject({ asleep: true, dim: 0, maxFps: 0.2 }); // the lowest wins: black
+
+  await report(request, true);
+  await waitAsleep(page, false);
+  await page.waitForTimeout(1000);
+  expect(await night()).toMatchObject({ asleep: true, dim: 0.2, maxFps: 10 }); // back to the night blob, not the face
+  expect(await dbg(page, 'view')).toBe('idle');
+  expect((await shape(page))?.b).toBe(0); // the sphere, no clock at night
+});

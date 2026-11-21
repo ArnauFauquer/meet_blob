@@ -19,10 +19,14 @@ sent and the page behaves exactly as before.
 "Activity" is the latest of: the room becoming empty, the end of the last turn, alert or error,
 and a tap on the dark screen. Only an idle screen rests or sleeps:
 
-*   An **active alert** is always shown, also with nobody there. A new alert lights the dark
-    screen; once it is gone the screen sleeps again after the quiet time. The alarm and the chime
-    follow the usual rules (sound flag, quiet hours, held during a turn); presence does not
-    change them.
+*   **Night mode** (`NIGHT_HOURS`) and presence both dim the screen; the darkest wins. At night
+    with nobody there the screen is black; at night with someone there it is night mode's sleeping
+    blob, and someone arriving at night brings back that sleeping blob, not the full face (a tap
+    or the wake word wakes it as usual). There is no clock at night.
+*   An **active alert** is always shown, also with nobody there (at night only urgent ones, as
+    night mode decides). A new alert lights the dark screen; once it is gone the screen sleeps
+    again after the quiet time. The alarm and the chime follow the usual rules (sound flag, quiet
+    hours, night hours, held during a turn); presence does not change them.
 *   **Hands-free keeps working.** The microphone, the wake word, the voice-activity detector and
     the socket keep running on the dark screen. "Hey Blob" starts a turn as usual and the screen
     lights up with it.
@@ -184,9 +188,11 @@ off as a page can:
     sources, such as the night mode's `night`), and the shader's dither is switched off at zero,
     so every pixel is exactly `#000`. The weather strip and the timer countdown fade out too; the
     fault line stays, so a real problem (microphone denied, offline) still shows.
-*   Once the black frame is on screen nothing is drawn and no animation frames are requested: the
-    page looks again four times a second with a timer (so waking takes at most about 250 ms). The
-    GPU and the compositor have nothing to do.
+*   Once the black frame is on screen, presence caps the frame rate (`setMaxFps('presence',
+    0.2)`, the same mechanism night mode uses): one black frame every 5 s instead of 30 per
+    second, so the GPU has almost nothing to do. The page still checks on every animation frame
+    and lifts the cap the moment anything happens (someone arrives, a tap, the wake word, an
+    alert), so waking is immediate.
 *   On an **OLED** screen black pixels are off: real energy savings and no burn-in. On an **LCD**
     the backlight stays lit (a dark glow in a dark room); the savings are the GPU and CPU work
     only. To really switch the backlight off you need something outside the page (a kiosk browser

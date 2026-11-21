@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { NIGHT_AWAKE_MS, NIGHT_DIM, NIGHT_FPS, NightMode } from './night';
 import { DARK_FPS, PresenceMachine, REST_WHEN_EMPTY_MS, showScreen } from './presence';
 
 const SLEEP_MS = 600_000;
@@ -194,5 +195,87 @@ describe('showScreen', () => {
     }
     showScreen('awake', null); // no WebGL
     expect(document.body.classList.contains('asleep')).toBe(false);
+  });
+});
+
+// Night mode (#12) and presence share the renderer's dim and frame cap; the
+// lowest of every source wins. The fake keeps that rule (BlobRenderer.setDim and
+// setMaxFps) and treats a dim of 0 as already faded to black.
+describe('night mode and presence together', () => {
+  class Screen {
+    private readonly dims = new Map<string, number>();
+    private readonly caps = new Map<string, number>();
+    setDim(source: string, v: number): void {
+      if (v >= 1) this.dims.delete(source);
+      else this.dims.set(source, v);
+    }
+    setMaxFps(source: string, fps: number): void {
+      if (!(fps > 0) || fps === Infinity) this.caps.delete(source);
+      else this.caps.set(source, fps);
+    }
+    get dim(): number {
+      return Math.min(1, ...this.dims.values());
+    }
+    get maxFps(): number {
+      return Math.min(Infinity, ...this.caps.values());
+    }
+    get dark(): boolean {
+      return this.dim <= 0;
+    }
+  }
+
+  function setup() {
+    let t = 0;
+    const screen = new Screen();
+    const night = new NightMode({
+      hours: () => ({ start: '23:00', end: '07:30' }),
+      apply: (dim, fps) => {
+        screen.setDim('night', dim);
+        screen.setMaxFps('night', fps);
+      },
+      now: () => new Date(2026, 10, 21, 2, 0), // 02:00, night
+      clock: () => t,
+    });
+    const presence = machine();
+    // One frame of the page: idle since 0, nothing going on.
+    const frame = () => {
+      night.update(false);
+      showScreen(presence.screen(t, 0, true), screen);
+      showScreen(presence.screen(t, 0, true), screen); // the next frame sees the black one drawn
+    };
+    return { screen, night, presence, frame, at: (ms: number) => (t = ms) };
+  }
+
+  it('at night with someone there: the sleeping blob of night mode', () => {
+    const { screen, night, presence, frame, at } = setup();
+    presence.report(true, 0, 0, 0, true);
+    at(10 * SLEEP_MS);
+    frame();
+    expect(night.asleep).toBe(true);
+    expect([screen.dim, screen.maxFps]).toEqual([NIGHT_DIM, NIGHT_FPS]);
+  });
+
+  it('at night with nobody there: the black screen wins', () => {
+    const { screen, night, presence, frame, at } = setup();
+    presence.report(false, 0, 0);
+    at(SLEEP_MS);
+    frame();
+    expect(night.asleep).toBe(true);
+    expect([screen.dim, screen.maxFps]).toEqual([0, DARK_FPS]);
+  });
+
+  it('a true at night lights the screen only as far as the sleeping night blob', () => {
+    const { screen, night, presence, frame, at } = setup();
+    presence.report(false, 0, 0);
+    at(SLEEP_MS);
+    frame();
+    expect(screen.dim).toBe(0);
+    presence.report(true, 0, SLEEP_MS, 0, true);
+    frame();
+    expect(night.asleep).toBe(true); // presence does not wake night mode
+    expect([screen.dim, screen.maxFps]).toEqual([NIGHT_DIM, NIGHT_FPS]);
+    at(SLEEP_MS + NIGHT_AWAKE_MS + 1);
+    frame();
+    expect(night.asleep).toBe(true);
   });
 });
