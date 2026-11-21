@@ -88,6 +88,7 @@ a WAV), `scripts/tts_cli.py` (synthesise text), `scripts/timings_report.py` (SC1
 | `/device-config` | session cookie (401 otherwise); the user's name, `sound`/`wake` flags from their groups, and page limits |
 | `/auth/login`, `/auth/callback`, `/auth/logout` | sign-in with the OIDC provider ([Sign-in](#sign-in)) |
 | `/alerts` | `Authorization: Bearer ALERT_TOKEN`; `POST`, `GET`, `DELETE /alerts/{key}` ([`docs/alerts.md`](docs/alerts.md)) |
+| `/presence` | `Authorization: Bearer ALERT_TOKEN`; `POST {present}`, `GET`, `DELETE`: a room sensor wakes the screen or lets it sleep ([`docs/presence.md`](docs/presence.md)) |
 | `/` | the built page from `STATIC_DIR` (`index.html` with `Cache-Control: no-cache`), or 404 with a message if it is not built |
 
 ### Configuration
