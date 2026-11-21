@@ -12,6 +12,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    StrictBool,
     StrictFloat,
     StrictInt,
     TypeAdapter,
@@ -193,6 +194,14 @@ class Pong(BaseModel):
     type: Literal["pong"] = "pong"
 
 
+class PresenceMsg(BaseModel):
+    """Presence wake: the last report of the room's sensor (POST /presence)."""
+
+    type: Literal["presence"] = "presence"
+    present: bool | None  # None: unknown (no sensor), the page behaves as today
+    since_s: float | None  # seconds since the current value started, when sent
+
+
 SERVER_MESSAGES: tuple[type[BaseModel], ...] = (
     HelloOk,
     Snapshot,
@@ -201,6 +210,7 @@ SERVER_MESSAGES: tuple[type[BaseModel], ...] = (
     TurnDone,
     Error,
     Pong,
+    PresenceMsg,
 )
 CLIENT_MESSAGES: tuple[type[BaseModel], ...] = (
     Hello,
@@ -276,3 +286,18 @@ class AlertOut(BaseModel):
     state: AlertState
     fire_at: int | None
     repeat: str | None = None  # the canonical rule of a recurring alert
+
+
+# HTTP: presence (a motion or occupancy sensor, through Home Assistant)
+
+
+class PresenceIn(BaseModel):
+    """POST /presence body. Strict: "on", "True" or 1 get 422 instead of a guess."""
+
+    model_config = ConfigDict(extra="forbid")
+    present: StrictBool
+
+
+class PresenceOut(BaseModel):
+    present: bool | None
+    since_s: float | None

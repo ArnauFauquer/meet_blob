@@ -104,6 +104,8 @@ export interface TurnDoneMsg {
 }
 export interface ErrorMsg { type: 'error'; code: ErrorCode }
 export interface PongMsg { type: 'pong' }
+// Presence wake: the room sensor's last report (null: unknown, no sensor).
+export interface PresenceMsg { type: 'presence'; present: boolean | null; since_s: number | null }
 
 export type ServerMessage =
   | HelloOkMsg
@@ -112,13 +114,14 @@ export type ServerMessage =
   | TtsMsg
   | TurnDoneMsg
   | ErrorMsg
-  | PongMsg;
+  | PongMsg
+  | PresenceMsg;
 
 export const CLIENT_TYPES = [
   'hello', 'tap', 'utterance', 'cancel', 'ping', 'client_event', 'wake', 'wake_clip', 'alert_read', 'alert_ack',
 ] as const satisfies readonly ClientMessage['type'][];
 export const SERVER_TYPES = [
-  'hello_ok', 'snapshot', 'state', 'tts', 'turn_done', 'error', 'pong',
+  'hello_ok', 'snapshot', 'state', 'tts', 'turn_done', 'error', 'pong', 'presence',
 ] as const satisfies readonly ServerMessage['type'][];
 
 // Messages followed by exactly one binary frame.

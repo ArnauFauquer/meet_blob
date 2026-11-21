@@ -661,6 +661,6 @@ void main() {
   col = 1.0 - exp(-col * 1.4);              // soft tone map, no hard clip
   col *= uDim;                              // after the tone map, so the brightest glints dim as much as the rest
   col = pow(col, vec3(1.0 / 2.2));
-  col += (hash(vec3(gl_FragCoord.xy, uFlow)) - 0.5) / 255.0; // dither the dark gradients
+  col += (hash(vec3(gl_FragCoord.xy, uFlow)) - 0.5) / 255.0 * step(1e-4, uDim); // dither the dark gradients; none when dimmed to black
   fragColor = vec4(col, 1.0);
 }

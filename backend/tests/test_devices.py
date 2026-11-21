@@ -32,6 +32,7 @@ def test_device_config(app_factory: Any) -> None:
         "silence_rms": 0.01,
         "debug_audio": False,
         "night": None,
+        "presence_sleep_s": 600.0,
     }
     assert (desktop["device"], desktop["sound"], desktop["wake"]) == ("desktop", False, False)
 
