@@ -16,6 +16,7 @@
 // whole ring. Boosted audio goes through a peak limiter (playback.ts), so a
 // boost never clips.
 
+import type { NightHours } from '../night';
 import { NoiseFloor, blockDbfs, eligible } from './noise';
 
 export type SoundKind = 'voice' | 'chime';
@@ -51,17 +52,15 @@ export const dbToGain = (db: number) => 10 ** (db / 20);
 
 // ---- Night -----------------------------------------------------------------
 //
-// UNIFY(night-mode): the night window belongs to the night-mode feature
-// (feat/night-mode), which serves it from /device-config as
-// `night: {start: "HH:MM", end: "HH:MM"}`, or `null` for no night. nightWindow()
-// reads that field when it is there and falls back to DEFAULT_NIGHT when the
-// backend does not send it yet. Only the curve (nightDb, RAMP_MIN) lives here.
+// The night is the house's one night: NIGHT_HOURS, served by /device-config as
+// `night: {start: "HH:MM", end: "HH:MM"}` (browser local time), or `null` when
+// it is not set, and then there is no night drop (night.ts reads the same
+// field). Only the volume's curve (nightDb, RAMP_MIN) lives here.
 
 export interface NightWindow {
   start: number; // minutes after midnight, local time
   end: number; // may be before start (the night crosses midnight)
 }
-export const DEFAULT_NIGHT: NightWindow = { start: 22 * 60, end: 8 * 60 };
 // The volume eases down over this long after the night starts, and back up over
 // this long before it ends; outside the window it is the day volume.
 export const RAMP_MIN = 45;
@@ -74,15 +73,13 @@ export function parseHm(s: unknown): number | null {
   return h > 23 || min > 59 ? null : h * 60 + min;
 }
 
-// /device-config `night`: missing → DEFAULT_NIGHT, null → no night, a window →
-// that window (malformed → DEFAULT_NIGHT).
-export function nightWindow(v: unknown): NightWindow | null {
-  if (v === undefined) return DEFAULT_NIGHT;
-  if (v === null) return null;
-  const o = v as { start?: unknown; end?: unknown };
-  const start = parseHm(o.start);
-  const end = parseHm(o.end);
-  return start === null || end === null ? DEFAULT_NIGHT : { start, end };
+// /device-config `night` in minutes; null (NIGHT_HOURS not set), missing or
+// malformed: no night.
+export function nightWindow(v: NightHours | null | undefined): NightWindow | null {
+  if (!v) return null;
+  const start = parseHm(v.start);
+  const end = parseHm(v.end);
+  return start === null || end === null ? null : { start, end };
 }
 
 const smoothstep = (x: number) => x * x * (3 - 2 * x);
@@ -104,7 +101,7 @@ export function nightness(now: Date, win: NightWindow | null, rampMin = RAMP_MIN
 // Page parameters for trying it by hand:
 //   ?volume=debug        log the estimate every 2 s and every gain applied
 //                        (client_event `volume`, and the browser console)
-//   &volume_at=23:30     pretend this is the local time (night curve)
+//   &volume_at=23:30     pretend this is the local time (night curve; needs NIGHT_HOURS)
 //   &volume_noise=-35    pretend this is the background noise, in dBFS
 export interface VolumeOptions {
   debug: boolean;
@@ -126,7 +123,7 @@ export const DEBUG_LOG_MS = 2_000;
 export interface VolumeDeps {
   quietForMs(): number; // how long Blob has been silent (0 while it plays)
   speech(): boolean; // the voice-activity detector hears speech now
-  night(): unknown; // /device-config `night` (see nightWindow)
+  night(): NightHours | null | undefined; // /device-config `night` (see nightWindow)
   log(e: Record<string, unknown>): void; // debug lines
   now?(): number; // ms, for the noise window
   date?(): Date; // local time, for the night

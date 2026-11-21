@@ -20,9 +20,12 @@ gain (dB) = curve.nightDb × nightness(local time) + boost(background noise)
 The boost is linear in dB between the two noise levels and adds to the night drop (a TV at
 23:30 gives about −9 + 4 dB).
 
-**Night.** Default window 22:00–08:00. The volume eases down over 45 min after the start and back
-up over 45 min before the end (smoothstep), so it never moves more than 0.3 dB per minute;
-outside the window it is the day volume.
+**Night.** The house's one night, `NIGHT_HOURS` (the same window as the night mode), read from
+`/device-config` `night: {start, end}`. Without `NIGHT_HOURS` (`night: null`) there is no night
+drop. Inside the window the volume eases down over 45 min after the start and back up over 45 min
+before the end (smoothstep), so it never moves more than 0.3 dB per minute; outside it is the day
+volume. The night mode's dimming switches at the window's edges; the volume eases in after them,
+so it is fully soft 45 min into the night.
 
 **Background noise.** Every 20 ms microphone block (the hands-free stream, or the recording of a
 tap turn on a tap-only page) gives one RMS level in dBFS. Blocks are skipped while Blob makes any
@@ -53,7 +56,7 @@ Page parameters (combine them):
 | Parameter | Effect |
 | --- | --- |
 | `?volume=debug` | logs `client_event` `kind: "volume"` (backend standard output) and `console.debug`: `event: "estimate"` every 2 s while the mic delivers audio, `event: "apply"` for each sound that starts, with `noise_dbfs`, `night` (0..1), `voice_db`, `chime_db`, `gain_db` |
-| `volume_at=23:30` | pretends this is the local time (to hear the night curve by day) |
+| `volume_at=23:30` | pretends this is the local time (to hear the night curve by day; only with `NIGHT_HOURS` set) |
 | `volume_noise=-35` | pretends this is the background noise in dBFS (to hear the boost in a quiet room) |
 
 The diagnostics view (long press) and the 10 s `mic` log line also show `volume`
@@ -75,12 +78,11 @@ late or not at all (the night curve does not depend on them).
 4.  If the hood or the dishwasher read close to the quiet room (Chrome's noise suppression removes
     stationary noise), note it here: the fix is a separate unprocessed track for the measurement.
 
-## Joining the night mode
+## The night mode
 
-`nightWindow()` in `volume.ts` (marked `UNIFY(night-mode)`) reads `/device-config` `night`:
-`{start: "HH:MM", end: "HH:MM"}` uses that window, `null` means no night (no night drop), a
-missing field uses the default 22:00–08:00. When the night mode lands, the default can go and the
-night window comes only from there; the volume keeps its own curve (`nightDb`, `RAMP_MIN`).
+`nightWindow()` in `volume.ts` reads the same `deviceConfig.night` (type `NightHours` from
+`night.ts`) as the night mode: one window for the house, no default of its own. The volume keeps
+only its curve (`nightDb`, `RAMP_MIN`).
 
 ## Not verified
 

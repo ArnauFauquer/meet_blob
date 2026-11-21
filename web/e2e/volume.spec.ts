@@ -1,6 +1,7 @@
 // Adaptive volume (audio/volume.ts) through its debug parameters: the night
-// curve with a pretended clock, the noise estimate from a tap recording, and
-// the gain the reply takes, logged as client_event `volume`.
+// curve (the mock serves a night around now to a device named "night"), the
+// noise estimate from a tap recording, and the gain the reply takes, logged as
+// client_event `volume`.
 import { expect, test } from '@playwright/test';
 import { dbg, log, mockOnly, openBlob, sent, tap, waitFor, waitView } from './helpers';
 
@@ -15,7 +16,7 @@ const volumeEvents = (l: Awaited<ReturnType<typeof log>>) => sent(l, 'client_eve
 
 test('at night the reply is softer; ?volume=debug logs the estimate and the gain applied', async ({ page }) => {
   mockOnly();
-  await openBlob(page, 'vol', undefined, '?volume=debug&volume_at=03:00');
+  await openBlob(page, 'vol-night', undefined, '?volume=debug');
   await waitView(page, 'idle');
   expect(await dbg<VolumeState>(page, 'volume')).toEqual({ noise_dbfs: null, night: 1, voice_db: -9, chime_db: -6 });
   await tap(page);

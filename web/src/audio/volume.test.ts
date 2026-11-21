@@ -4,7 +4,6 @@ import {
   AdaptiveVolume,
   CHIME_CURVE,
   DEBUG_LOG_MS,
-  DEFAULT_NIGHT,
   NOISE_LOUD_DBFS,
   NOISE_QUIET_DBFS,
   RAMP_MIN,
@@ -71,34 +70,39 @@ describe('gain curve', () => {
   });
 });
 
+// NIGHT_HOURS=22:00-08:00
+const HOURS = { start: '22:00', end: '08:00' };
+const NIGHT = nightWindow(HOURS);
+
 describe('night', () => {
-  it('reads the night window from /device-config, or the default', () => {
-    expect(nightWindow(undefined)).toEqual(DEFAULT_NIGHT);
-    expect(nightWindow(null)).toBeNull();
+  it('reads the night window from /device-config; without NIGHT_HOURS there is no night', () => {
+    expect(NIGHT).toEqual({ start: 22 * 60, end: 8 * 60 });
     expect(nightWindow({ start: '23:15', end: '06:30' })).toEqual({ start: 23 * 60 + 15, end: 6 * 60 + 30 });
-    expect(nightWindow({ start: '25:00', end: '06:30' })).toEqual(DEFAULT_NIGHT);
-    expect(nightWindow('22-7')).toEqual(DEFAULT_NIGHT);
+    expect(nightWindow(null)).toBeNull();
+    expect(nightWindow(undefined)).toBeNull();
+    expect(nightWindow({ start: '25:00', end: '06:30' })).toBeNull();
+    expect(nightness(at('03:00'), nightWindow(null))).toBe(0);
   });
 
   it('is 0 in the day and 1 deep in the night (22:00-08:00)', () => {
-    expect(nightness(at('12:00'), DEFAULT_NIGHT)).toBe(0);
-    expect(nightness(at('21:59'), DEFAULT_NIGHT)).toBe(0);
-    expect(nightness(at('03:00'), DEFAULT_NIGHT)).toBe(1);
-    expect(nightness(at('08:00'), DEFAULT_NIGHT)).toBe(0);
+    expect(nightness(at('12:00'), NIGHT)).toBe(0);
+    expect(nightness(at('21:59'), NIGHT)).toBe(0);
+    expect(nightness(at('03:00'), NIGHT)).toBe(1);
+    expect(nightness(at('08:00'), NIGHT)).toBe(0);
   });
 
   it('eases in after the start and out before the end', () => {
-    expect(nightness(at('22:22', 30), DEFAULT_NIGHT)).toBeCloseTo(0.5, 5);
-    expect(nightness(at('22:45'), DEFAULT_NIGHT)).toBe(1);
-    expect(nightness(at('07:15'), DEFAULT_NIGHT)).toBe(1);
-    expect(nightness(at('07:37', 30), DEFAULT_NIGHT)).toBeCloseTo(0.5, 5); // RAMP_MIN / 2 before the end
+    expect(nightness(at('22:22', 30), NIGHT)).toBeCloseTo(0.5, 5);
+    expect(nightness(at('22:45'), NIGHT)).toBe(1);
+    expect(nightness(at('07:15'), NIGHT)).toBe(1);
+    expect(nightness(at('07:37', 30), NIGHT)).toBeCloseTo(0.5, 5); // RAMP_MIN / 2 before the end
   });
 
   it('changes by little from one minute to the next, all day long', () => {
-    let prev = nightness(at('00:00'), DEFAULT_NIGHT);
+    let prev = nightness(at('00:00'), NIGHT);
     let maxStep = 0;
     for (let m = 1; m <= 24 * 60; m++) {
-      const v = nightness(new Date(2026, 10, 20, 0, m), DEFAULT_NIGHT);
+      const v = nightness(new Date(2026, 10, 20, 0, m), NIGHT);
       maxStep = Math.max(maxStep, Math.abs(v - prev));
       prev = v;
     }
@@ -131,7 +135,7 @@ describe('AdaptiveVolume', () => {
     const deps: VolumeDeps = {
       quietForMs: () => Infinity,
       speech: () => false,
-      night: () => undefined,
+      night: () => HOURS,
       log,
       now: () => t,
       date: () => at('12:00'),
@@ -180,11 +184,11 @@ describe('AdaptiveVolume', () => {
     expect(v.state().voice_db).toBe(0);
   });
 
-  it('at night: softer, with the window from /device-config when it is there', () => {
+  it('at night: softer, in the window from /device-config; no drop without NIGHT_HOURS', () => {
     const { v } = make({ date: () => at('02:00') });
     expect(v.state()).toMatchObject({ night: 1, voice_db: VOICE_CURVE.nightDb, chime_db: CHIME_CURVE.nightDb });
     const off = make({ date: () => at('02:00'), night: () => null }).v;
-    expect(off.state().voice_db).toBe(0);
+    expect(off.state()).toMatchObject({ night: 0, voice_db: 0, chime_db: 0 });
     const late = make({ date: () => at('22:30'), night: () => ({ start: '23:30', end: '07:00' }) }).v;
     expect(late.state().night).toBe(0);
   });

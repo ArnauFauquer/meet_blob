@@ -122,7 +122,7 @@ const volume = new AdaptiveVolume(
   {
     quietForMs: () => playback.quietForMs(),
     speech: () => vad.active && vad.lastP >= NEGATIVE,
-    night: () => (deviceConfig as { night?: unknown }).night,
+    night: () => deviceConfig.night,
     log: (e) => sock.send({ type: 'client_event', kind: 'volume', ...e }),
   },
   volumeOptions(location.search),
