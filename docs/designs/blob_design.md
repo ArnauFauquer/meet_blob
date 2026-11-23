@@ -235,7 +235,7 @@ Two data tables in the page, not in code branches:
 *   Conversation state to colour and motion: `idle` deep blue/violet with slow breathing, `listening` cyan deforming with the microphone level, `thinking` amber with slow breathing, `speaking` warm white pulsing with playback level, `error` dim grey.
 *   Alert source and urgency to shape, colour and pulse speed. Slice 4 starts with two shapes: triangle for `timer`, square for every other source. `info` is green and `urgent` is red (constants in `tables.ts`), and `urgent` pulses at twice the rate of `info` (a constant in `tables.ts`). A morph between two shapes uses `mix(sdfA, sdfB, t)` with the march step shortened to about 0.7.
 
-Pending timers (`snapshot.timers`) orbit the blob as droplets, one per timer, smaller as less time is left, warmer in the last minute. When a timer fires, its drop falls back into the body (smooth-min) before the alert shape takes over. They replace the text countdown. Details in `docs/notes/look.md`, "Timer droplets".
+Pending timers (`snapshot.timers`) orbit the blob as droplets, one per timer, smaller as less time is left, warmer in the last minute, each with its time left inside it in seven-segment digits (m:ss, 1h30 from an hour). When a timer fires, its drop falls back into the body (smooth-min) before the alert shape takes over. The text countdown above the blob moved into the drops. Details in `docs/notes/look.md`, "Timer droplets".
 
 The shader is one fullscreen quad. Transparency is a fresnel term over a procedural dark environment, tinted per state. There is no refraction pass. Tablet cost controls: render at 0.75 scale, exit early outside a bounding sphere, cap idle at 30 fps, handle `webglcontextlost`.
 
