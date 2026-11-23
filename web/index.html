@@ -39,7 +39,7 @@
       #weather .rp { font-size: 0.75em; color: rgba(120, 180, 255, 0.8); min-height: 1em; }
       /* Night mode: the text fades with the sleeping blob, and the weather strip stays off. */
       #fault, #timer { transition: opacity 2.5s ease; }
-      body.night #fault, body.night #timer { opacity: 0.4; }
+      body.night #fault { opacity: 0.4; }
       /* Presence wake: the dark screen shows nothing but the fault line (after night mode, so it wins). */
       body.asleep #weather, body.asleep #timer { opacity: 0; transition: opacity 2s ease; }
       #enroll {

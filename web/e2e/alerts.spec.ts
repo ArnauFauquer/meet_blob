@@ -162,7 +162,7 @@ test('alert synthesis fails: the alert stays, the beep plays, no alert_ack (mock
   }
 });
 
-interface Droplet { key: string; mode: string; r: number; out: number }
+interface Droplet { key: string; mode: string; r: number; out: number; text: string }
 const droplets = (page: import('@playwright/test').Page) => dbg<Droplet[]>(page, 'droplets');
 
 test('a pending timer orbits the blob as a droplet and fades when deleted', async ({ page }) => {
@@ -176,7 +176,10 @@ test('a pending timer orbits the blob as a droplet and fades when deleted', asyn
   await expect.poll(async () => (await droplets(page))?.filter((d) => d.mode === 'orbit').length, { message: 'two drops' }).toBe(2);
   const ds = (await droplets(page))!;
   expect(ds.find((d) => d.key === oven)!.r).toBeGreaterThan(ds.find((d) => d.key === key)!.r); // more time, bigger drop
-  expect(await page.locator('#timer').count()).toBe(0); // no text countdown any more
+  // The time left is in the drop (m:ss), not in a text countdown above the blob.
+  expect(ds.find((d) => d.key === oven)!.text).toMatch(/^4[45]:\d\d$/);
+  expect(ds.find((d) => d.key === key)!.text).toMatch(/^[12]:\d\d$/);
+  expect(await page.locator('#timer').count()).toBe(0);
   await alerts.del(key);
   await expect.poll(async () => (await droplets(page))?.map((d) => d.key), { message: 'the deleted drop fades' }).toEqual([oven]);
   expect(await dbg(page, 'view')).toBe('idle'); // still pending: no alert shown

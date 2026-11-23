@@ -6,9 +6,12 @@ import {
   Droplets,
   MAX_DROPS,
   dropRadius,
+  dropText,
   orbitFor,
   ripeness,
   shapeExtent,
+  textScale,
+  textString,
   type Orbit,
 } from './droplets';
 import { SHAPE } from './tables';
@@ -44,6 +47,43 @@ describe('dropRadius', () => {
   });
 });
 
+describe('dropText', () => {
+  const show = (s: number) => textString(dropText(s));
+
+  it('reads like a kitchen timer: m:ss, then 1h30 from an hour, seconds alone in the last minute', () => {
+    expect(show(45 * 60)).toBe('45:00');
+    expect(show(8 * 60)).toBe('8:00');
+    expect(show(479.2)).toBe('8:00'); // rounds up, like timerText
+    expect(show(61)).toBe('1:01');
+    expect(show(60)).toBe('1:00');
+    expect(show(59.5)).toBe('1:00');
+    expect(show(59)).toBe('59');
+    expect(show(5)).toBe('5');
+    expect(show(0)).toBe('0');
+    expect(show(-3)).toBe('0');
+    expect(show(3600)).toBe('1h00');
+    expect(show(90 * 60)).toBe('1h30');
+    expect(show(12 * 3600)).toBe('12h');
+  });
+
+  it('never shows more than four glyphs', () => {
+    for (const s of [0, 9, 59, 60, 599, 600, 3599, 3600, 35999, 36000, 1e7]) {
+      expect(dropText(s).glyphs.length).toBeLessThanOrEqual(4);
+      expect(dropText(s).glyphs.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('fits the text inside the drop, longer text smaller', () => {
+    const a = textScale(dropText(45 * 60));
+    const b = textScale(dropText(8 * 60));
+    const c = textScale(dropText(30));
+    expect(a).toBeLessThan(b);
+    expect(b).toBeLessThan(c);
+    // Half width of "45:00" (four glyphs, a colon, the strokes) inside the drop.
+    expect(((3 * 1.6 + 0.55 + 2 * 0.67) / 2) * a).toBeLessThan(0.9);
+  });
+});
+
 describe('ripeness', () => {
   it('is 0 until the last minute, then rises to 1', () => {
     expect(ripeness(600)).toBe(0);
@@ -59,7 +99,9 @@ describe('orbitFor', () => {
     const o = orbitFor(ext, DROP_R_MAX, 1.417 * 1.6, 1.36);
     expect(o.a - DROP_R_MAX - ext.w).toBeGreaterThanOrEqual(DROP_GAP - 1e-9);
     expect(o.b - DROP_R_MAX - ext.h).toBeGreaterThanOrEqual(DROP_GAP - 1e-9);
-    expect(o.fit).toBeGreaterThan(0.85); // only for the drops passing above and below
+    // Only for the drops passing above and below, and only this much with the
+    // largest drops (a two hour timer), which hold the time in digits.
+    expect(o.fit).toBeGreaterThan(0.8);
     expect((o.b + DROP_R_MAX) * (3.4 / (3.4 - o.c)) * o.fit).toBeLessThanOrEqual(1.36 - 0.05 + 1e-9);
     expect(orbitFor(shapeExtent(SHAPE.triangle, 1.6), 0.1, 1.417 * 1.6, 1.36).fit).toBeGreaterThan(0.9);
   });

@@ -13,8 +13,9 @@ import { ALERT_LAVA, SHAPE, type SkyParts } from './tables';
 // so the drops hop, twirl and squash with the body.
 
 export const MAX_DROPS = 6; // DROPS in blob.frag; the soonest timers get a drop
-export const DROP_R_MIN = 0.07; // radius at 0 s left (the sphere's is 0.78)
-export const DROP_R_MAX = 0.19; // radius at DROP_FULL_S or more
+// Big enough for the time left in digits inside the drop (dropText).
+export const DROP_R_MIN = 0.12; // radius at 0 s left (the sphere's is 0.78)
+export const DROP_R_MAX = 0.24; // radius at DROP_FULL_S or more
 const DROP_FULL_S = 2 * 3600;
 export const RIPE_S = 60; // the last minute: warmer and pulsing
 export const DROP_LAVA = ALERT_LAVA.urgent; // a ripe drop glows towards the timer alert's colour
@@ -25,7 +26,48 @@ const SPHERE_R = 0.78; // uRadius: the volume every shape holds (#34)
 // the power spreads the long timers out.
 export function dropRadius(leftS: number): number {
   const f = Math.min(1, Math.log1p(Math.max(0, leftS) / 20) / Math.log1p(DROP_FULL_S / 20));
-  return DROP_R_MIN + (DROP_R_MAX - DROP_R_MIN) * f ** 1.5;
+  return DROP_R_MIN + (DROP_R_MAX - DROP_R_MIN) * f ** 2;
+}
+
+// The time left as the drop shows it, in seven-segment glyphs (blob.frag:
+// dropTextDist): m:ss under an hour, 1h30 from an hour, the seconds alone in
+// the last minute (no colon: "45" is seconds, "45:00" minutes).
+export const GLYPH_H = 10; // a lowercase h
+export interface DropText {
+  glyphs: number[]; // 1 to 4 glyphs: 0..9, GLYPH_H
+  colon: boolean; // before the last two glyphs
+}
+
+export function dropText(leftS: number): DropText {
+  const s = Math.max(0, Math.ceil(leftS - 1e-6));
+  const digits = (x: number) => [...String(x)].map(Number);
+  const two = (x: number) => [Math.floor(x / 10), x % 10];
+  if (s < 60) return { glyphs: digits(s), colon: false };
+  if (s < 3600) return { glyphs: [...digits(Math.floor(s / 60)), ...two(s % 60)], colon: true };
+  const h = Math.min(99, Math.floor(s / 3600));
+  if (h >= 10) return { glyphs: [...digits(h), GLYPH_H], colon: false };
+  return { glyphs: [h, GLYPH_H, ...two(Math.floor((s % 3600) / 60))], colon: false };
+}
+
+// The glyphs as a string ("8:00", "1h30"), for the diagnostics and the tests.
+export function textString(t: DropText): string {
+  const g = t.glyphs.map((x) => (x === GLYPH_H ? 'h' : String(x)));
+  if (t.colon) g.splice(g.length - 2, 0, ':');
+  return g.join('');
+}
+
+// Text layout in glyph units (a glyph is 2 tall), as in blob.frag (TEXT_*).
+const TEXT_HX = 0.5; // glyph half width
+const TEXT_PITCH = 1.6; // glyph to glyph
+const TEXT_COLON = 0.55; // extra room for the colon
+const TEXT_STROKE = 0.17; // stroke half width
+const TEXT_R = 0.86; // the text fits this share of the drop's radius
+const TEXT_MAX = 0.46; // one or two glyphs: no bigger than this
+
+// Scale from glyph units to drop radii, so the text fits inside the drop.
+export function textScale(t: DropText): number {
+  const w = (t.glyphs.length - 1) * TEXT_PITCH + (t.colon ? TEXT_COLON : 0) + 2 * (TEXT_HX + TEXT_STROKE);
+  return Math.min(TEXT_MAX, TEXT_R / Math.hypot(w / 2, 1 + TEXT_STROKE));
 }
 
 // 0 until the last minute, then up to 1 when the timer fires.
@@ -146,6 +188,8 @@ export class Droplets {
     return {
       uDrops: { value: new Float32Array(MAX_DROPS * 4) },
       uDropGlow: { value: new Float32Array(MAX_DROPS * 2) },
+      uDropText: { value: new Float32Array(MAX_DROPS * 4) },
+      uDropInk: { value: new Float32Array(MAX_DROPS * 4) },
       uDropN: { value: 0 },
       uDropReach: { value: 0 },
       uDropLava: { value: new Vector3(...DROP_LAVA) },
@@ -162,7 +206,10 @@ export class Droplets {
     // A resting shape is already scaled to its room: the orbit fits what is left.
     const target = orbitFor(ext, this.rMax, (HALF_VIEW * aspect) / f.rest, f.roomH / f.rest);
     const gulps = this.step(dt, f.timers, f.fired, target);
-    const out = this.write(f.t, u.uDrops.value as Float32Array, u.uDropGlow.value as Float32Array);
+    const out = this.write(f.t, u.uDrops.value as Float32Array, u.uDropGlow.value as Float32Array, {
+      text: u.uDropText.value as Float32Array,
+      ink: u.uDropInk.value as Float32Array,
+    });
     u.uDropN.value = out.n;
     u.uDropReach.value = out.reach;
     this.scale = this.orbit.fit * out.vol;
@@ -170,8 +217,8 @@ export class Droplets {
   }
 
   // For the e2e tests and the diagnostics.
-  get summary(): { key: string; mode: string; r: number; out: number }[] {
-    return this.drops.map(({ key, mode, r, out }) => ({ key, mode, r: +r.toFixed(3), out: +out.toFixed(2) }));
+  get summary(): { key: string; mode: string; r: number; out: number; text: string }[] {
+    return this.drops.map(({ key, mode, r, out, left }) => ({ key, mode, r: +r.toFixed(3), out: +out.toFixed(2), text: textString(dropText(left)) }));
   }
   private base = 0; // turning angle of the ring
   private next = 0;
@@ -261,8 +308,10 @@ export class Droplets {
     return r || DROP_R_MAX;
   }
 
-  // Writes uDrops (centre xyz, radius) and uDropGlow (glow, ripeness) for time `t`.
-  write(t: number, drops: Float32Array, glow: Float32Array): DropOut {
+  // Writes uDrops (centre xyz, radius) and uDropGlow (glow, ripeness) for
+  // time `t`; with `ink`, uDropText (glyphs, -1 none) and uDropInk (glyph
+  // count, colon, text scale, opacity).
+  write(t: number, drops: Float32Array, glow: Float32Array, ink?: { text: Float32Array; ink: Float32Array }): DropOut {
     const o = this.orbit;
     let n = 0;
     let reach = 0;
@@ -286,6 +335,13 @@ export class Droplets {
       const pulse = ripe > 0 ? 0.5 + 0.5 * Math.sin(t * TAU * (0.5 + 1.5 * ripe)) : 0;
       glow[n * 2] = 0.45 + 0.55 * ripe * (0.6 + 0.4 * pulse);
       glow[n * 2 + 1] = ripe;
+      if (ink) {
+        const tx = dropText(d.left);
+        for (let g = 0; g < 4; g++) ink.text[n * 4 + g] = tx.glyphs[g] ?? -1;
+        // The time shows once the drop is off the body, and goes as it falls back in or fades.
+        const show = smooth(Math.min(1, Math.max(0, (d.out - 0.5) / 0.5))) * (d.mode === 'vanish' ? Math.max(0, d.fade) : 1);
+        ink.ink.set([tx.glyphs.length, tx.colon ? 1 : 0, textScale(tx), show], n * 4);
+      }
       reach = Math.max(reach, Math.hypot(x, y, z) + r);
       outside += (r / SPHERE_R) ** 3 * smooth(Math.min(1, d.out));
       n++;

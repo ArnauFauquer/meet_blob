@@ -83,6 +83,8 @@ uniform vec2 uDropGlow[DROPS]; // lava glow, ripeness (0..1 over the last minute
 uniform int uDropN;
 uniform float uDropReach;      // body units: the farthest drop surface, 0 without drops
 uniform vec3 uDropLava;        // a ripe drop glows towards this (the timer alert's lava)
+uniform vec4 uDropText[DROPS]; // the time left: up to four glyphs (0..9, 10 an h), -1 none
+uniform vec4 uDropInk[DROPS];  // glyph count, colon (before the last two), text scale, opacity
 #endif
 
 out vec4 fragColor;
@@ -330,7 +332,7 @@ bool isWeather(float id) {
 // Smooth-min reach of a drop: a neck forms within it. Smaller than DROP_GAP
 // (droplets.ts), so an orbiting drop stays round and apart.
 float dropK(float r) {
-  return 0.05 + 0.5 * r;
+  return 0.04 + 0.4 * r;
 }
 
 float withDrops(vec3 p, float d) {
@@ -572,6 +574,42 @@ float clockDist(vec2 q) {
   return min(mix(d.y, d.x, smoothstep(0.0, 1.0, uTick)), colon) - 0.045;
 }
 
+#if DROPS > 0
+// The time left on a timer drop in seven segments ("45:00", "8:00", "1h30",
+// "30"): distance to the strokes, in units of the drop radius, the text
+// centred and scaled (ink.z) to fit. Layout as in droplets.ts (TEXT_*).
+const int SEG_LOWER_H = 116;
+const vec2 TEXT_HS = vec2(0.5, 1.0);
+const float TEXT_PITCH = 1.6;
+const float TEXT_COLON = 0.55;
+const float TEXT_STROKE = 0.17;
+float dropTextDist(vec2 q, vec4 glyphs, vec4 ink) {
+  q /= ink.z;
+  int n = int(ink.x + 0.5);
+  bool colon = ink.y > 0.5;
+  float x = -0.5 * (float(n - 1) * TEXT_PITCH + (colon ? TEXT_COLON : 0.0));
+  float d = 1e3;
+  for (int i = 0; i < 4; i++) {
+    if (i >= n) break;
+    if (colon && i == n - 2) {
+      x += TEXT_COLON;
+      d = min(d, length(vec2(q.x - x + 0.5 * (TEXT_PITCH + TEXT_COLON), abs(q.y) - 0.42)));
+    }
+    int g = int(glyphs[i] + 0.5);
+    int segs = g > 9 ? SEG_LOWER_H : SEG[clamp(g, 0, 9)];
+    vec2 c = q - vec2(x, 0.0);
+    for (int s = 0; s < 7; s++) {
+      if (((segs >> s) & 1) == 0) continue;
+      vec2 pa = c - SEG_LINE[s].xy * TEXT_HS;
+      vec2 ba = (SEG_LINE[s].zw - SEG_LINE[s].xy) * TEXT_HS;
+      d = min(d, length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0)));
+    }
+    x += TEXT_PITCH;
+  }
+  return (d - TEXT_STROKE) * ink.z;
+}
+#endif
+
 // Glow of one lava sample: a soft halo outside the shape, then brighter
 // towards the core, so a slice through a lobe is never a flat disc.
 float lavaHeat(float ld, float r) {
@@ -678,17 +716,36 @@ void main() {
       }
       // Timer droplets: a bead of lava, brightest where it faces the camera;
       // in its last minute it pulses and warms towards the timer's colour.
+      // The time left is written on it like the face: light on a darker mirror,
+      // on a plane that faces the camera, so it reads anywhere on the orbit.
       vec3 lava = uLava;
       float ember = 0.0; // a ripe drop's own glow, over the mirror
+      float ink = 0.0;   // the time's strokes
 #if DROPS > 0
       float ripe = 0.0;
+      float plate = 0.0; // the mirror goes dark behind the time
+      float aa = px * t / uBodyK; // one pixel, body units
       for (int i = 0; i < DROPS; i++) {
         if (i >= uDropN) break;
-        float w = 1.0 - smoothstep(0.0, dropK(uDrops[i].w), length(bp - uDrops[i].xyz) - uDrops[i].w);
-        heat += w * uDropGlow[i].x * (0.35 + 0.65 * ndv);
+        float dr = uDrops[i].w;
+        vec3 rel = bp - uDrops[i].xyz;
+        float w = 1.0 - smoothstep(0.0, dropK(dr), length(rel) - dr);
+        heat += w * uDropGlow[i].x * (0.35 + 0.65 * ndv) * (1.0 - 0.5 * plate);
         ripe = max(ripe, w * uDropGlow[i].y);
         ember = max(ember, w * uDropGlow[i].y * uDropGlow[i].x);
+        float on = w * uDropInk[i].w;
+        if (on > 0.01) {
+          vec3 v = normalize(uDrops[i].xyz - bo); // camera to drop, body frame
+          vec3 tu = normalize(cross(v, vec3(0.0, 1.0, 0.0)));
+          vec3 tv = cross(tu, v);
+          float fd = dropTextDist(vec2(dot(rel, tu), dot(rel, tv)) / dr, uDropText[i], uDropInk[i]) * dr;
+          on *= smoothstep(0.1, 0.45, dot(bn, -v));
+          plate = max(plate, on * (0.5 + 0.45 * exp(-max(fd, 0.0) / (0.12 * dr))));
+          heat += on * 0.35 * exp(-max(fd, 0.0) / (0.06 * dr));
+          ink = max(ink, on * smoothstep(aa, -aa, fd));
+        }
       }
+      spec *= 1.0 - plate;
       lava = mix(uLava, uDropLava, ripe);
 #endif
       float blob = min(heat, 1.0);
@@ -705,7 +762,8 @@ void main() {
       lit = mix(lit, mix(uLava, vec3(1.0, 0.42, 0.5), 0.6) * 0.85, tongue);
       lit = mix(lit, mix(uLava, vec3(1.0), 0.7) * 1.1, face);
 #if DROPS > 0
-      lit = mix(lit, uDropLava * (0.45 + 0.75 * ndv), 0.7 * ember);
+      lit = mix(lit, uDropLava * (0.45 + 0.75 * ndv), 0.7 * ember * (1.0 - 0.6 * plate));
+      lit = mix(lit, mix(lava, vec3(1.0), 0.7) * 1.1, ink);
 #endif
       col = mix(col, lit, cov);
     }
